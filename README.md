@@ -159,9 +159,8 @@ Every push to `main` runs `.github/workflows/release.yml`. It builds a signed AP
 
 **One-time setup:**
 1. Push this folder to a private GitHub repo with branch `main`.
-2. Create a deploy key for Firebase: Google Cloud console → IAM & Admin → Service accounts → **Create service account** `github-deploy`. Give it these roles: *Firebase Admin*, *Cloud Functions Admin*, *Service Account User*, *Cloud Scheduler Admin*, *Artifact Registry Administrator*, *Cloud Build Editor*, *API Keys Viewer*. Then **Keys → Add key → JSON**.
+2. Give GitHub deploy access without a key file (Workload Identity Federation; works when the organisation blocks service-account keys). Run the `gcloud` commands from the "Keyless deploy" block below once. Then set the GitHub **variables** `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`. If your organisation allows key files, the secret `FIREBASE_SERVICE_ACCOUNT` (JSON key) also works instead.
 3. GitHub → Settings → Secrets and variables → Actions. **Secrets**:
-   - `FIREBASE_SERVICE_ACCOUNT` (the whole JSON file)
    - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_FIREBASE_VAPID_KEY` (same values as `.env.local`)
    - `GOOGLE_SERVICES_JSON` = `base64 -i android/app/google-services.json`
    - `ANDROID_KEYSTORE_BASE64` = `base64 -i exera-release.jks`, plus `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`exera`) and `ANDROID_KEY_PASSWORD`
@@ -172,6 +171,25 @@ Every push to `main` runs `.github/workflows/release.yml`. It builds a signed AP
    - `DEPLOY_ONLY` (`hosting,firestore` while on the free plan)
    - `PLAY_SIGNING_SHA256` (only if you also publish on Google Play)
 4. Push. Actions → **Release** shows progress (about 10 minutes). The APK is on the Releases page and at `/app-update/exera-cargo-driver.apk`.
+
+**Keyless deploy (one-time, Terminal with gcloud):**
+```bash
+P=exeracargo-za; N=128836026074; REPO=VijzCo/exeracargo; SA=github-deploy@$P.iam.gserviceaccount.com
+gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project $P
+gcloud iam service-accounts create github-deploy --project $P --display-name "GitHub deploy"
+for r in firebase.admin cloudfunctions.admin run.admin iam.serviceAccountUser cloudscheduler.admin artifactregistry.admin \
+         cloudbuild.builds.editor serviceusage.apiKeysViewer serviceusage.serviceUsageConsumer eventarc.admin; do
+  gcloud projects add-iam-policy-binding $P --member "serviceAccount:$SA" --role "roles/$r" --condition=None -q >/dev/null
+done
+gcloud iam workload-identity-pools create github --project $P --location global --display-name GitHub
+gcloud iam workload-identity-pools providers create-oidc github-oidc --project $P --location global \
+  --workload-identity-pool github --issuer-uri https://token.actions.githubusercontent.com \
+  --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition "assertion.repository=='$REPO'"
+gcloud iam service-accounts add-iam-policy-binding $SA --project $P --role roles/iam.workloadIdentityUser \
+  --member "principalSet://iam.googleapis.com/projects/$N/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+```
+GitHub variables: `GCP_WORKLOAD_IDENTITY_PROVIDER` = `projects/128836026074/locations/global/workloadIdentityPools/github/providers/github-oidc` and `GCP_SERVICE_ACCOUNT` = `github-deploy@exeracargo-za.iam.gserviceaccount.com`.
 
 `assetlinks.json` (links opening in the app) is generated from the signing key on every release, so the manual `npm run assetlinks` step is not needed when you use this workflow. `android.yml` remains for manual test builds.
 

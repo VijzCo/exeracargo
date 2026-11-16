@@ -8,7 +8,9 @@
 # Secrets (Settings → Secrets and variables → Actions → Secrets):
 #   VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_STORAGE_BUCKET,
 #   VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID, VITE_FIREBASE_VAPID_KEY
-#   FIREBASE_SERVICE_ACCOUNT      JSON key of a service account allowed to deploy (see README "Auto-deploy")
+#   Firebase deploy access — EITHER keyless (recommended; required when the org blocks key creation):
+#     variables GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT (Workload Identity Federation, README "Auto-deploy")
+#   OR secret FIREBASE_SERVICE_ACCOUNT (JSON key of the deploy service account)
 #   GOOGLE_SERVICES_JSON          base64 of android/app/google-services.json (push notifications in the app)
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD   (required:
 #                                 updates only install over an app signed with the SAME key)
@@ -24,6 +26,7 @@ on:
 
 permissions:
   contents: write # GitHub Release
+  id-token: write # keyless Google Cloud login (Workload Identity Federation)
 
 concurrency:
   group: release
@@ -35,7 +38,6 @@ jobs:
     timeout-minutes: 45
     env:
       VERSION: 1.0.${{ github.run_number }}
-      APP_VERSION_CODE: ${{ 100 + github.run_number }}
       APP_VERSION_NAME: 1.0.${{ github.run_number }}
       VITE_APP_VERSION: 1.0.${{ github.run_number }}
     steps:
@@ -56,15 +58,20 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      - name: Version code
+        # GitHub expressions have no arithmetic — compute it here (100 + run number)
+        run: echo "APP_VERSION_CODE=$((100 + ${{ github.run_number }}))" >> "$GITHUB_ENV"
+
       - name: Check secrets
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          WIF: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           API: ${{ secrets.VITE_FIREBASE_API_KEY }}
         run: |
           missing=""
           [ -z "$KS" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
-          [ -z "$SA" ] && missing="$missing FIREBASE_SERVICE_ACCOUNT"
+          [ -z "$SA" ] && [ -z "$WIF" ] && missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER+GCP_SERVICE_ACCOUNT(variables)_or_FIREBASE_SERVICE_ACCOUNT"
           [ -z "$API" ] && missing="$missing VITE_FIREBASE_*"
           if [ -n "$missing" ]; then echo "::error::Missing secrets:$missing (see the header of .github/workflows/release.yml)"; exit 1; fi
 
@@ -159,13 +166,24 @@ jobs:
           node scripts/update-manifest.mjs "$RUNNER_TEMP/android-dist" dist "$VERSION" "$ORIGIN" "$APP_VERSION_CODE" "$min" "$RUNNER_TEMP/out/exera-cargo-driver.apk"
 
       # ── 3. Firebase deploy ──
+      - name: Google Cloud login (keyless)
+        if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
       - name: Deploy to Firebase
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           DEPLOY_ONLY: ${{ vars.DEPLOY_ONLY || 'hosting,firestore,functions' }}
         run: |
-          echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+            export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          fi
           if [ -n "${{ vars.FUNCTIONS_REGION }}" ]; then echo "FUNCTIONS_REGION=${{ vars.FUNCTIONS_REGION }}" > functions/.env; fi
           npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only "$DEPLOY_ONLY" --non-interactive --force
           rm -f "$RUNNER_TEMP/sa.json"

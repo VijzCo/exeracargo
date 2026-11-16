@@ -20,3 +20,6 @@ android/app/build/
 *.jks
 *.keystore
 dist-demo/
+
+# Firebase Android config (any name) — provide via GOOGLE_SERVICES_JSON secret
+android/app/google-services*.json
