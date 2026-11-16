@@ -197,6 +197,22 @@ export function UiProvider({ children }: { children: ReactNode }) {
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+// Page scroll lock shared by all open modals/drawers. A counter (not "restore the previous value")
+// so dialogs that open/close out of order can never leave the page stuck without scrolling.
+let scrollLocks = 0;
+function lockScroll() {
+  scrollLocks += 1;
+  document.body.style.overflow = 'hidden';
+}
+function unlockScroll() {
+  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (scrollLocks === 0) document.body.style.overflow = '';
+}
+/** Safety net (route changes): clear a lock left behind when no dialog is open. */
+export function resetScrollLockIfIdle() {
+  if (scrollLocks === 0 && document.body.style.overflow === 'hidden') document.body.style.overflow = '';
+}
+
 export function Modal({
   open,
   onClose,
@@ -228,10 +244,9 @@ export function Modal({
     const first =
       el?.querySelector<HTMLElement>('[data-autofocus]') ?? el?.querySelector<HTMLElement>(FOCUSABLE) ?? el;
     first?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockScroll();
     return () => {
-      document.body.style.overflow = prevOverflow;
+      unlockScroll();
       prev?.focus?.();
     };
   }, [open]);

@@ -8,7 +8,7 @@ import { isSuper, signOutSafe, useAdmin } from './AuthGate';
 import { PushPrompt } from '../push/PushPrompt';
 import { pushSignOut, usePushRegistration } from '../push/usePush';
 import { useDraft } from './content/draft';
-import { useUi } from './ui';
+import { useUi, resetScrollLockIfIdle } from './ui';
 import { useUnreadOps } from './ops/hooks';
 
 interface NavItem {
@@ -47,7 +47,10 @@ export default function Shell({ children }: { children: ReactNode }) {
   const unread = useUnreadOps();
   usePushRegistration({ tenantId: tenant.id, uid: profile.uid, role: 'ops' });
 
-  useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => {
+    setOpen(false);
+    resetScrollLockIfIdle();
+  }, [loc.pathname]);
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
