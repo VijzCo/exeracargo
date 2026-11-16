@@ -132,6 +132,15 @@
             "value": "camera=(self), microphone=(), geolocation=(self)"
           }
         ]
+      },
+      {
+        "source": "**/!(*.*)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
   },
