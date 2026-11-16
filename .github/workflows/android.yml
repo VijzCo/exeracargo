@@ -1,0 +1,122 @@
+# Builds the Exera Cargo Driver Android app (APK + AAB).
+# Run: GitHub → Actions → "Android driver app" → Run workflow (test builds; releases use release.yml).
+# Secrets (Settings → Secrets and variables → Actions):
+#   VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_STORAGE_BUCKET,
+#   VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID, VITE_DEFAULT_TENANT, VITE_PUBLIC_ORIGIN
+#   GOOGLE_SERVICES_JSON          base64 of android/app/google-services.json (push notifications)
+#   ANDROID_KEYSTORE_BASE64       base64 of your release .jks   ┐ optional — without them a debug
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD ┘ APK is built instead
+# Variables (optional): APP_LINK_HOST (default exeracargo.web.app)
+name: Android driver app
+
+# Manual builds only. Normal releases (and auto-updates) come from release.yml on every push to main.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      APP_LINK_HOST: ${{ vars.APP_LINK_HOST || 'exeracargo.web.app' }}
+      APP_VERSION_CODE: ${{ github.run_number }}
+      APP_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('1.0.{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: App config (.env.android.local)
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_DEFAULT_TENANT: ${{ secrets.VITE_DEFAULT_TENANT }}
+          VITE_PUBLIC_ORIGIN: ${{ secrets.VITE_PUBLIC_ORIGIN }}
+          FUNCTIONS_REGION: ${{ vars.FUNCTIONS_REGION }}
+        run: |
+          {
+            for k in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_STORAGE_BUCKET \
+                     VITE_FIREBASE_MESSAGING_SENDER_ID VITE_FIREBASE_APP_ID VITE_DEFAULT_TENANT VITE_PUBLIC_ORIGIN; do
+              v="${!k}"; [ -n "$v" ] && echo "$k=$v"
+            done
+            echo "VITE_FUNCTIONS_REGION=${FUNCTIONS_REGION:-africa-south1}"
+          } > .env.android.local
+          if [ -z "$VITE_FIREBASE_API_KEY" ]; then echo "::warning::No Firebase secrets — the app will run in demo mode."; fi
+
+      - name: google-services.json (push)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON not set — push notifications are disabled in this build."
+          fi
+
+      - run: npm ci
+
+      - name: Web build + Capacitor sync
+        run: npm run build:android
+
+      - name: Signing key
+        id: sign
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No keystore secrets — building a debug APK."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gradle release (APK + AAB)
+        if: steps.sign.outputs.signed == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease bundleRelease
+
+      - name: Gradle debug (APK)
+        if: steps.sign.outputs.signed != 'true'
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exera-cargo-driver-${{ env.APP_VERSION_NAME }}
+          path: |
+            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
+          retention-days: 30

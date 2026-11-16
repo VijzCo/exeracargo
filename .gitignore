@@ -5,3 +5,18 @@ dist
 .firebase
 .firebaserc
 *.log
+
+public/ocr/
+
+# Cloud Functions build
+functions/node_modules/
+functions/lib/
+# Android: generated web copy, build output, secrets
+android/app/src/main/assets/public/
+android/app/google-services.json
+android/.gradle/
+android/build/
+android/app/build/
+*.jks
+*.keystore
+dist-demo/

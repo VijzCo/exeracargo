@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { chargeableKg, computeFreightQuote, computeQuote, findPromo } from '../lib/quote';
 import { CROSS_BORDER_NAMES, estimateRoadKm, findBorderPost, findPlace, type CrossBorderCode } from '../geo';
@@ -8,6 +8,9 @@ import { BOOKING_STATUSES, type Booking, type BookingStatus } from '../tenant/ty
 import { listBookings, updateBookingStatus } from '../lib/data';
 import { telLink } from '../lib/wa';
 import { bookingsToCsv, customerWaLink, STATUS_LABEL, todayYmd } from './bookingUtils';
+import { watchJob } from '../ops/store';
+import type { Job } from '../ops/types';
+import { bookingToJobDraft } from './ops/fromBooking';
 import { copyText, downloadText, EmptyState, errMsg, fmtDateTime, Modal, PageHeader, useLoader, useUi } from './ui';
 
 const PAGE = 50;
@@ -275,6 +278,8 @@ function BookingDrawer({
   const [status, setStatus] = useState<BookingStatus>('pending');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null | undefined>(undefined);
+  const nav = useNavigate();
 
   useEffect(() => {
     if (booking) {
@@ -282,6 +287,12 @@ function BookingDrawer({
       setNote(booking.adminNote ?? '');
     }
   }, [booking]);
+
+  useEffect(() => {
+    setJob(undefined);
+    if (!booking) return;
+    return watchJob(tenant.id, booking.ref, setJob);
+  }, [tenant.id, booking?.ref]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!booking) return <Modal open={false} onClose={onClose} title="" />;
   const b = booking;
@@ -334,6 +345,20 @@ function BookingDrawer({
     >
       <div className="stack">
         <div className="adm-actions-row">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={job !== null || b.status === 'cancelled'}
+            title={job ? `Job ${job.ref} already exists` : b.status === 'cancelled' ? 'Booking is cancelled' : 'Create a dispatch job from this booking'}
+            onClick={() => nav('/admin/jobs/new', { state: { draft: bookingToJobDraft(b, tenant) } })}
+          >
+            <Icon name="freight" size={16} /> {job === undefined ? 'Checking…' : job ? 'Job created' : 'Create job'}
+          </button>
+          {job ? (
+            <Link className="btn btn-ghost btn-sm" to={`/admin/jobs/${encodeURIComponent(job.id)}`}>
+              Open job <span className="mono">{job.ref}</span>
+            </Link>
+          ) : null}
           <a className="btn btn-ghost btn-sm" href={telLink(b.customer.phone)}>
             <Icon name="phone" size={16} /> Call
           </a>

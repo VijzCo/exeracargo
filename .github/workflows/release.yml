@@ -1,0 +1,184 @@
+# Continuous delivery: every push to main →
+#   1. Android app: web bundle + signed APK (versionCode = 100 + run number)
+#   2. Website build with /app-update/ (latest.json, bundle zip, APK) for the in-app auto-updater
+#   3. Firebase deploy: hosting + Firestore rules/indexes + Cloud Functions
+#   4. GitHub Release v1.0.<run> with the APK attached
+# Installed apps pick up web changes by themselves (next launch); native changes ask for the new APK.
+#
+# Secrets (Settings → Secrets and variables → Actions → Secrets):
+#   VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_STORAGE_BUCKET,
+#   VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID, VITE_FIREBASE_VAPID_KEY
+#   FIREBASE_SERVICE_ACCOUNT      JSON key of a service account allowed to deploy (see README "Auto-deploy")
+#   GOOGLE_SERVICES_JSON          base64 of android/app/google-services.json (push notifications in the app)
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD   (required:
+#                                 updates only install over an app signed with the SAME key)
+# Variables (Settings → Secrets and variables → Actions → Variables), all optional:
+#   VITE_DEFAULT_TENANT (exera) · VITE_PUBLIC_ORIGIN (default https://<project-id>.web.app) · FUNCTIONS_REGION (africa-south1)
+#   APP_LINK_HOST (default: host of VITE_PUBLIC_ORIGIN) · PLAY_SIGNING_SHA256 (only if published on Google Play) · DEPLOY_ONLY (e.g. "hosting,firestore" to skip functions on Spark)
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # GitHub Release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+      APP_VERSION_CODE: ${{ 100 + github.run_number }}
+      APP_VERSION_NAME: 1.0.${{ github.run_number }}
+      VITE_APP_VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Check secrets
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          API: ${{ secrets.VITE_FIREBASE_API_KEY }}
+        run: |
+          missing=""
+          [ -z "$KS" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -z "$SA" ] && missing="$missing FIREBASE_SERVICE_ACCOUNT"
+          [ -z "$API" ] && missing="$missing VITE_FIREBASE_*"
+          if [ -n "$missing" ]; then echo "::error::Missing secrets:$missing (see the header of .github/workflows/release.yml)"; exit 1; fi
+
+      - name: App config (.env.production.local + .env.android.local)
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          VITE_DEFAULT_TENANT: ${{ vars.VITE_DEFAULT_TENANT || 'exera' }}
+          VITE_FUNCTIONS_REGION: ${{ vars.FUNCTIONS_REGION || 'africa-south1' }}
+          VAR_ORIGIN: ${{ vars.VITE_PUBLIC_ORIGIN }}
+          VAR_LINK_HOST: ${{ vars.APP_LINK_HOST }}
+        run: |
+          # live address: the variable, else https://<project-id>.web.app
+          ORIGIN="${VAR_ORIGIN:-https://$VITE_FIREBASE_PROJECT_ID.web.app}"; ORIGIN="${ORIGIN%/}"
+          APP_LINK_HOST="${VAR_LINK_HOST:-${ORIGIN#https://}}"
+          echo "ORIGIN=$ORIGIN" >> "$GITHUB_ENV"
+          echo "APP_LINK_HOST=$APP_LINK_HOST" >> "$GITHUB_ENV"
+          {
+            for k in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_STORAGE_BUCKET \
+                     VITE_FIREBASE_MESSAGING_SENDER_ID VITE_FIREBASE_APP_ID VITE_FIREBASE_VAPID_KEY VITE_DEFAULT_TENANT VITE_FUNCTIONS_REGION; do
+              v="${!k}"; [ -n "$v" ] && echo "$k=$v"
+            done
+            echo "VITE_PUBLIC_ORIGIN=$ORIGIN"
+          } > .env.production.local
+          cp .env.production.local .env.android.local
+          echo "PROJECT_ID=$VITE_FIREBASE_PROJECT_ID" >> "$GITHUB_ENV"
+
+      - name: google-services.json + signing key
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+          else echo "::warning::GOOGLE_SERVICES_JSON not set — push notifications are off in the app."; fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Install
+        run: |
+          npm ci
+          npm --prefix functions ci
+
+      # ── 1. Android: web bundle for the app + signed APK ──
+      - name: Android web bundle + Capacitor sync
+        run: npm run build:android
+
+      - name: Keep the app's web files (live update)
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp -R dist "$RUNNER_TEMP/android-dist"
+
+      - name: Gradle release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/*.apk "$RUNNER_TEMP/out/exera-cargo-driver.apk"
+
+      # ── 2. Website + /app-update ──
+      - name: App Links file from the signing key (links open in the app)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          sha=$(keytool -list -v -keystore "$ANDROID_KEYSTORE_FILE" -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" | awk '/SHA256:/{print $2; exit}')
+          extra="${{ vars.PLAY_SIGNING_SHA256 }}"
+          ANDROID_SHA256="$sha${extra:+,$extra}" npm run assetlinks
+
+      - name: Website build
+        run: npm run build
+
+      - name: Update manifest (/app-update)
+        run: |
+          set -e
+          # native part changed in this push? → older apps must install the new APK before taking web updates
+          native=0
+          if ! git rev-parse -q --verify HEAD^ >/dev/null; then native=1
+          elif git diff --name-only HEAD^ HEAD | grep -qE '^(android/|capacitor\.config\.ts$)'; then native=1
+          elif git diff HEAD^ HEAD -- package.json | grep -qE '^[+-].*"@(capacitor|capgo)/'; then native=1; fi
+          prev=$(curl -fsS "$ORIGIN/app-update/latest.json" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).apk.minVersionCode||0)}catch{console.log(0)}})' || echo 0)
+          if [ "$native" = "1" ] || [ "$prev" = "0" ]; then min=$APP_VERSION_CODE; else min=$prev; fi
+          echo "native changed: $native · minVersionCode: $min"
+          node scripts/update-manifest.mjs "$RUNNER_TEMP/android-dist" dist "$VERSION" "$ORIGIN" "$APP_VERSION_CODE" "$min" "$RUNNER_TEMP/out/exera-cargo-driver.apk"
+
+      # ── 3. Firebase deploy ──
+      - name: Deploy to Firebase
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DEPLOY_ONLY: ${{ vars.DEPLOY_ONLY || 'hosting,firestore,functions' }}
+        run: |
+          echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          if [ -n "${{ vars.FUNCTIONS_REGION }}" ]; then echo "FUNCTIONS_REGION=${{ vars.FUNCTIONS_REGION }}" > functions/.env; fi
+          npx --yes firebase-tools@latest deploy --project "$PROJECT_ID" --only "$DEPLOY_ONLY" --non-interactive --force
+          rm -f "$RUNNER_TEMP/sa.json"
+
+      # ── 4. GitHub Release ──
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Exera Cargo ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Driver app ${{ env.VERSION }} (versionCode ${{ env.APP_VERSION_CODE }}).
+            Direct download: ${{ env.ORIGIN }}/app-update/exera-cargo-driver.apk
+            Installed apps update themselves; this file is for first installs.
+          files: ${{ runner.temp }}/out/exera-cargo-driver.apk

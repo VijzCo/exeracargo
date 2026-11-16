@@ -1,9 +1,9 @@
 import type { TenantConfig } from '../types';
 import { deepMerge } from '../merge';
-import { kopano } from './kopano';
+import { exera } from './exera';
 
 /** Second ZA demo tenant — light theme, logistics/cross-border first (Free State ↔ Lesotho corridor). */
-export const maluti: TenantConfig = deepMerge(kopano, {
+export const maluti: TenantConfig = deepMerge(exera, {
   id: 'maluti',
   name: 'Maluti Freight Lines',
   tagline: 'Part-load, courier and full loads between Gauteng, Free State and Lesotho.',

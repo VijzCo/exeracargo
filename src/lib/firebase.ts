@@ -41,6 +41,19 @@ export function getDb(): Firestore {
 /** Auth SDK is loaded on demand (admin console only) to keep public pages light. */
 export function getFbAuth(): Promise<Auth> {
   if (!app) return Promise.reject(new Error('Firebase not configured'));
-  authPromise ??= import('firebase/auth').then(({ getAuth }) => getAuth(app!));
+  authPromise ??= import('firebase/auth').then(({ getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence }) =>
+    // Android app WebView: no popup/redirect resolver (it loads an auth iframe that can stall start-up)
+    import.meta.env.VITE_NATIVE === '1'
+      ? initializeAuth(app!, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] })
+      : getAuth(app!),
+  );
   return authPromise;
 }
+
+/** The initialised Firebase app (null in demo mode). */
+export function getFbApp(): FirebaseApp | null {
+  return app;
+}
+
+/** Web config — used to spin up a secondary app for creating driver logins without signing the admin out. */
+export const firebaseConfig = config;

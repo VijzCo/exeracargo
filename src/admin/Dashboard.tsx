@@ -6,6 +6,7 @@ import { BOOKING_STATUSES, type Booking } from '../tenant/types';
 import { dataMode, listBookings, listMessages } from '../lib/data';
 import { STATUS_LABEL, todayYmd, ymd } from './bookingUtils';
 import { EmptyState, fmtDateTime, PageHeader, useLoader } from './ui';
+import OpsDashboard from './ops/OpsDashboard';
 
 const DAY = 86_400_000;
 
@@ -79,6 +80,13 @@ export default function Dashboard() {
         }
       />
       <SetupChecklist />
+      <OpsDashboard />
+      <div className="spread ops-dash-head">
+        <h2 className="adm-h2">Website bookings</h2>
+        <Link to="/admin/bookings" className="adm-link small">
+          All bookings →
+        </Link>
+      </div>
       {error ? (
         <div className="alert alert-err" role="alert">
           <Icon name="x" size={18} /> Couldn’t load bookings: {error}

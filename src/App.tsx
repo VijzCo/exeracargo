@@ -15,6 +15,8 @@ import NotFound from './pages/NotFound';
 const Booking = lazy(() => import('./pages/Booking'));
 const Track = lazy(() => import('./pages/Track'));
 const Admin = lazy(() => import('./admin/AdminApp'));
+const DriverApp = lazy(() => import('./driver/DriverApp'));
+const JobLinkPage = lazy(() => import('./driver/JobLinkPage'));
 
 const Router = import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : BrowserRouter;
 
@@ -33,6 +35,8 @@ export default function App() {
         <Suspense fallback={<Fallback />}>
           <Routes>
             <Route path="/admin/*" element={<Admin />} />
+            <Route path="/driver/*" element={<DriverApp />} />
+            <Route path="/j/:token" element={<JobLinkPage />} />
             <Route element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="fleet" element={<FleetPage />} />

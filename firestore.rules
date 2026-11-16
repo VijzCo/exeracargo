@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// HaulPro — multi-tenant Firestore rules (Spark plan, no Cloud Functions).
+// Exera Cargo — multi-tenant Firestore rules. Push notifications use Cloud Functions (Admin SDK bypasses rules).
 // Public visitors may only: read tenant configs/domains, create validated bookings,
 // tracking records and contact messages, and get a single tracking doc by ref.
 service cloud.firestore {
@@ -16,6 +16,59 @@ service cloud.firestore {
     function isAdmin() {
       return signedIn() && exists(adminPath());
     }
+    // active driver of tenant t (driver doc id == auth uid)
+    // external (one-time link) drivers lose access when their link expires
+    function isDriver(t) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/tenants/$(t)/drivers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/tenants/$(t)/drivers/$(request.auth.uid)).data.active == true
+        && (get(/databases/$(database)/documents/tenants/$(t)/drivers/$(request.auth.uid)).data.get('external', false) == false
+            || get(/databases/$(database)/documents/tenants/$(t)/drivers/$(request.auth.uid)).data.expiresAt > request.time.toMillis());
+    }
+    // company driver (not a one-time-link driver): fleet list, broadcast chat, fuel log
+    function isInternalDriver(t) {
+      return isDriver(t)
+        && get(/databases/$(database)/documents/tenants/$(t)/drivers/$(request.auth.uid)).data.get('external', false) == false;
+    }
+    // one-time link, as it will be after the current write/batch
+    function linkAfter(token) {
+      return getAfter(/databases/$(database)/documents/jobLinks/$(token)).data;
+    }
+    function claimedByMe(t, token) {
+      let l = linkAfter(token);
+      return l.tenantId == t && l.status == 'claimed' && l.claimedBy == request.auth.uid && request.time.toMillis() < l.expiresAt;
+    }
+    // driver doc an external driver may write for themself when claiming a link
+    // prevExp: the expiry the phone already had from an earlier link (kept when it is later)
+    function validExtDriver(t, prevExp) {
+      let d = request.resource.data;
+      return d.external == true && d.active == true && d.loginId == 'link'
+        && d.linkToken is string && claimedByMe(t, d.linkToken)
+        && (d.expiresAt == linkAfter(d.linkToken).expiresAt
+            || (prevExp > linkAfter(d.linkToken).expiresAt && d.expiresAt == prevExp))
+        && str(d.name, 1, 120)
+        && d.status in ['off_duty', 'available', 'on_job']
+        && d.keys().hasOnly(['name', 'phone', 'status', 'active', 'ownership', 'transporterId', 'transporterName', 'external',
+                             'linkToken', 'expiresAt', 'loginId', 'createdAt', 'updatedAt']);
+    }
+    // the only status moves a driver may make: one step forward, or 'failed' from an open step
+    // (multi-stop jobs loop between pickups and deliveries)
+    function driverStep(from, to) {
+      return (from == 'assigned' && to == 'accepted')
+        || (from == 'accepted' && to == 'started')
+        || (from == 'started' && to in ['at_pickup', 'in_transit'])
+        || (from == 'at_pickup' && to == 'loaded')
+        || (from == 'loaded' && to in ['in_transit', 'at_pickup'])
+        || (from == 'in_transit' && to in ['at_pickup', 'at_delivery'])
+        || (from == 'at_delivery' && to in ['delivered', 'in_transit'])
+        || (from == 'delivered' && to == 'completed')
+        || (to == 'failed' && from in ['assigned', 'accepted', 'started', 'at_pickup', 'loaded', 'in_transit', 'at_delivery']);
+    }
+    function driverOfJob(t, jobId) {
+      return isDriver(t)
+        && get(/databases/$(database)/documents/tenants/$(t)/jobs/$(jobId)).data.driverId == request.auth.uid;
+    }
+
     function isSuper() {
       return isAdmin() && get(adminPath()).data.role == 'super';
     }
@@ -70,8 +123,8 @@ service cloud.firestore {
         // doc id == booking ref so tracking create can prove a booking exists
         allow create: if tenantExists(t) && id == request.resource.data.ref && validBooking(request.resource.data, t);
         allow read, delete: if canManage(t);
-        allow update: if canManage(t)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt'])
+        allow update: if (canManage(t) || driverOfJob(t, id))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(canManage(t) ? ['status', 'adminNote', 'updatedAt'] : ['status', 'updatedAt'])
           && request.resource.data.status in statuses()
           && (!('adminNote' in request.resource.data) || str(request.resource.data.adminNote, 0, 1000))
           && request.resource.data.updatedAt is int;
@@ -85,6 +138,11 @@ service cloud.firestore {
           && existsAfter(/databases/$(database)/documents/tenants/$(t)/bookings/$(ref))
           && !exists(/databases/$(database)/documents/tenants/$(t)/bookings/$(ref));
         allow update, delete: if canManage(t);
+        // the assigned driver's app keeps the customer's tracking status in step with the job
+        allow update: if driverOfJob(t, ref)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'note'])
+          && request.resource.data.status in statuses()
+          && (!('note' in request.resource.data) || str(request.resource.data.note, 0, 300));
       }
 
       // contact messages
@@ -92,6 +150,184 @@ service cloud.firestore {
         allow create: if tenantExists(t) && validMessage(request.resource.data);
         allow read, delete: if canManage(t);
       }
+
+      // ══ Operations: dispatch console (managers) + driver app (drivers) ══
+
+      match /vehicles/{vid} {
+        allow read: if canManage(t) || isInternalDriver(t);
+        allow create, delete: if canManage(t);
+        allow update: if canManage(t)
+          || (isDriver(t)
+              // only the vehicle on a job this driver is assigned to (job id passed as lastJobId)
+              && request.resource.data.lastJobId is string
+              && get(/databases/$(database)/documents/tenants/$(t)/jobs/$(request.resource.data.lastJobId)).data.driverId == request.auth.uid
+              && get(/databases/$(database)/documents/tenants/$(t)/jobs/$(request.resource.data.lastJobId)).data.vehicleId == vid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['odometerKm', 'status', 'updatedAt', 'lastJobId'])
+              && request.resource.data.odometerKm is number
+              && request.resource.data.odometerKm >= resource.data.get('odometerKm', 0)
+              && request.resource.data.odometerKm <= resource.data.get('odometerKm', 0) + 5000
+              && request.resource.data.status in ['available', 'on_job']);
+      }
+
+      match /drivers/{uid} {
+        allow read: if canManage(t) || (signedIn() && request.auth.uid == uid);
+        allow delete: if canManage(t);
+        allow create: if canManage(t) || (signedIn() && request.auth.uid == uid && validExtDriver(t, 0));
+        allow update: if canManage(t)
+          || (signedIn() && request.auth.uid == uid && resource.data.active == true
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+              && request.resource.data.status in ['off_duty', 'available', 'on_job'])
+          // the same phone opening another link (still an external driver)
+          || (signedIn() && request.auth.uid == uid && resource.data.get('external', false) == true
+              && validExtDriver(t, resource.data.get('expiresAt', 0)));
+      }
+
+      match /jobs/{jobId} {
+        allow read: if canManage(t) || (isDriver(t) && resource.data.driverId == request.auth.uid);
+        allow create, delete: if canManage(t);
+        allow update: if canManage(t)
+          // external driver claiming a one-time link: placeholder driver → their anonymous uid
+          || (signedIn()
+              && resource.data.get('extLink', null) != null
+              && resource.data.driverId == 'link:' + resource.data.extLink.token
+              && claimedByMe(t, resource.data.extLink.token)
+              && jobId in linkAfter(resource.data.extLink.token).jobIds
+              && request.resource.data.driverId == request.auth.uid
+              && request.resource.data.extLink.token == resource.data.extLink.token
+              && request.resource.data.extLink.status == 'claimed'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['driverId', 'driverName', 'extLink', 'updatedAt']))
+          || (isDriver(t)
+              && resource.data.driverId == request.auth.uid
+              && request.resource.data.driverId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['status', 'stops', 'odoStart', 'odoEnd', 'actualKm', 'inspection', 'pod', 'failReason', 'updatedAt', 'lastEventAt'])
+              && (!('stops' in request.resource.data) || (request.resource.data.stops is list && request.resource.data.stops.size() <= 30))
+              && driverStep(resource.data.status, request.resource.data.status)
+              // start reading is fixed once captured; end ≥ start and within a sane trip length
+              && (!('odoStart' in resource.data) || request.resource.data.odoStart == resource.data.odoStart)
+              && (!('odoEnd' in request.resource.data) || !('odoStart' in request.resource.data)
+                  || (request.resource.data.odoEnd.km is number
+                      && request.resource.data.odoEnd.km >= request.resource.data.odoStart.km
+                      && request.resource.data.odoEnd.km <= request.resource.data.odoStart.km + 5000))
+              && (!('actualKm' in request.resource.data)
+                  || (request.resource.data.actualKm is number && request.resource.data.actualKm >= 0 && request.resource.data.actualKm <= 5000))
+              && (!('failReason' in request.resource.data) || str(request.resource.data.failReason, 0, 300))
+              && (!('pod' in request.resource.data) || request.resource.data.pod.size() <= 12)
+              && (!('inspection' in request.resource.data) || request.resource.data.inspection.size() <= 12));
+
+        match /events/{eid} {
+          allow read: if canManage(t) || driverOfJob(t, jobId);
+          allow create: if (canManage(t) || driverOfJob(t, jobId))
+            && request.resource.data.by == request.auth.uid
+            && str(request.resource.data.byName, 1, 120)
+            && (!('note' in request.resource.data) || str(request.resource.data.note, 0, 1000));
+          allow update, delete: if false; // append-only audit trail
+        }
+      }
+
+      // photos / signatures stored inline (no Cloud Storage on Spark)
+      match /media/{mid} {
+        allow read: if canManage(t)
+          || (isDriver(t)
+              && (resource.data.by == request.auth.uid
+                  // chat photos only from the driver's own thread or the broadcast channel
+                  || (resource.data.kind == 'chat' && resource.data.get('threadId', '') == request.auth.uid)
+                  || (resource.data.kind == 'chat' && resource.data.get('threadId', '') == 'broadcast' && isInternalDriver(t))
+                  // photos of a job currently assigned to this driver
+                  || (resource.data.get('jobId', '') != '' && driverOfJob(t, resource.data.jobId))));
+        allow create: if (canManage(t) || isDriver(t))
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.dataUrl is string
+          && request.resource.data.dataUrl.size() <= 900000
+          && request.resource.data.dataUrl.matches('^data:image/(jpeg|png);base64,.*')
+          && request.resource.data.kind in ['odo_start', 'odo_end', 'fuel_odo', 'pod_photo', 'signature', 'inspection', 'load', 'damage', 'receipt', 'chat']
+          && (request.resource.data.kind != 'chat' || canManage(t) || request.resource.data.get('threadId', '') == request.auth.uid);
+        allow update: if false;
+        allow delete: if canManage(t);
+      }
+
+      // chat: thread id == driver uid, or 'broadcast'
+      match /threads/{th} {
+        allow read: if canManage(t) || (isDriver(t) && th == request.auth.uid) || (th == 'broadcast' && isInternalDriver(t));
+        allow write: if canManage(t)
+          || (isDriver(t) && th == request.auth.uid
+              && request.resource.data.keys().hasOnly(['driverId', 'driverName', 'lastText', 'lastAt', 'lastFrom', 'unreadOps', 'unreadDriver']));
+
+        match /messages/{mid} {
+          allow read: if canManage(t) || (isDriver(t) && th == request.auth.uid) || (th == 'broadcast' && isInternalDriver(t));
+          allow create: if request.resource.data.from == request.auth.uid
+            && str(request.resource.data.text, 0, 2000)
+            && (canManage(t) || (isDriver(t) && th == request.auth.uid && request.resource.data.role == 'driver'));
+          allow update, delete: if canManage(t);
+        }
+      }
+
+      // ── dispatch-only commercial data ──
+      match /transporters/{id} {
+        allow read, write: if canManage(t);
+      }
+      match /finance/{jobId} {
+        allow read, write: if canManage(t);
+      }
+      match /settlements/{id} {
+        allow read, create: if canManage(t);
+        // paid statements are final
+        allow update, delete: if canManage(t) && resource.data.status != 'paid';
+      }
+
+      // push tokens: doc id = "<uid>__<installId>"; only Cloud Functions read them all
+      match /devices/{deviceId} {
+        allow read, delete: if signedIn() && (resource.data.uid == request.auth.uid || canManage(t));
+        allow create, update: if signedIn()
+          && deviceId.matches(request.auth.uid + '__[A-Za-z0-9_-]{6,64}')
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.tenantId == t
+          && ((request.resource.data.role == 'ops' && canManage(t)) || (request.resource.data.role == 'driver' && isDriver(t)))
+          && request.resource.data.platform in ['android', 'ios', 'web']
+          && str(request.resource.data.token, 20, 4096)
+          && request.resource.data.keys().hasOnly(['uid', 'role', 'token', 'platform', 'tenantId', 'updatedAt']);
+      }
+
+      match /locations/{uid} {
+        allow read: if canManage(t);
+        allow delete: if canManage(t) || (signedIn() && request.auth.uid == uid);
+        allow create, update: if isDriver(t) && request.auth.uid == uid
+          && request.resource.data.driverId == uid
+          && request.resource.data.lat is number && request.resource.data.lng is number;
+      }
+
+      match /fuel/{fid} {
+        allow read: if canManage(t) || (isInternalDriver(t) && resource.data.driverId == request.auth.uid);
+        allow create: if canManage(t) || (isInternalDriver(t) && request.resource.data.driverId == request.auth.uid
+          && request.resource.data.litres is number && request.resource.data.litres > 0 && request.resource.data.litres <= 2000);
+        allow update, delete: if canManage(t);
+      }
+    }
+
+    // one-time job links: the 32-char token is the secret, so single gets are public
+    match /jobLinks/{token} {
+      allow get: if true;
+      allow list: if signedIn() && canManage(resource.data.tenantId);
+      allow create: if canManage(request.resource.data.tenantId)
+        && token.size() >= 24
+        && request.resource.data.token == token
+        && request.resource.data.status == 'open'
+        && request.resource.data.jobIds is list && request.resource.data.jobIds.size() >= 1 && request.resource.data.jobIds.size() <= 20;
+      allow update: if canManage(resource.data.tenantId)
+        || (signedIn()
+            && resource.data.status == 'open'
+            && request.time.toMillis() < resource.data.expiresAt
+            && request.resource.data.status == 'claimed'
+            && request.resource.data.claimedBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedBy', 'claimedAt']));
+      allow delete: if canManage(resource.data.tenantId);
+    }
+
+    // driver uid → tenant (written by managers when creating a login)
+    match /driverIndex/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if canManage(request.resource.data.tenantId);
+      allow delete: if isSuper();
     }
 
     // ── domain → tenant map ────────────────────────────────
@@ -116,7 +352,7 @@ service cloud.firestore {
         && d.status == 'pending'
         && isRef(d.ref)
         && validCustomer(d.customer)
-        && ((d.kind == 'freight' && d.freight.service in ['ltl', 'courier']) ? str(d.vehicleId, 0, 60) : str(d.vehicleId, 1, 60))
+        && ((d.kind == 'freight' && d.freight['service'] in ['ltl', 'courier']) ? str(d.vehicleId, 0, 60) : str(d.vehicleId, 1, 60))
         && str(d.vehicleName, 1, 100)
         && optStr(d, 'serviceId', 60)
         && str(d.loadType, 1, 60)
@@ -175,7 +411,7 @@ service cloud.firestore {
                             'description', 'declaredValue', 'insured', 'hazardous', 'tailLift', 'helpers', 'afterHours'])
         && f.keys().hasOnly(['service', 'level', 'packages', 'pallets', 'weightKg', 'lengthCm', 'widthCm', 'heightCm',
                              'description', 'declaredValue', 'insured', 'hazardous', 'tailLift', 'helpers', 'afterHours', 'crossBorder'])
-        && f.service in ['ftl', 'ltl', 'courier', 'removals']
+        && f['service'] in ['ftl', 'ltl', 'courier', 'removals']
         && f.level in ['economy', 'express', 'sameday']
         && num(f.packages, 0, 500)
         && num(f.pallets, 0, 40)

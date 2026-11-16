@@ -1,5 +1,5 @@
 /* ────────────────────────────────────────────────────────────
-   HaulPro admin console. Theme vars only (set by applyTheme).
+   Exera Cargo admin console. Theme vars only (set by applyTheme).
    All selectors prefixed .adm- to avoid clashing with the site.
    ──────────────────────────────────────────────────────────── */
 .adm-root {
@@ -1455,4 +1455,21 @@
 }
 .adm-kv dd {
   margin: 0;
+}
+
+/* ── operations nav (dispatch console) ── */
+.adm-nav-group {
+  margin: 12px 12px 4px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.adm-nav-link span.adm-nav-badge {
+  flex: none;
+}
+.adm-top-unread {
+  flex: none;
 }

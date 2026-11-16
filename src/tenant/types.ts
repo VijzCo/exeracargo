@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// HaulPro white-label tenant schema. One TenantConfig = one website.
+// Exera Cargo white-label tenant schema. One TenantConfig = one website.
 // Stored at Firestore `tenants/{id}`; bundled presets are the fallback.
 // ─────────────────────────────────────────────────────────────
 import type { CountryCode, Currency, CrossBorderCode } from '../geo/types';

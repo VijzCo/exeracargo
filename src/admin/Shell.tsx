@@ -1,12 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { safeHttpsUrl } from '../lib/url';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { useTenant } from '../tenant/TenantProvider';
 import { dataMode } from '../lib/data';
 import { isSuper, signOutSafe, useAdmin } from './AuthGate';
+import { PushPrompt } from '../push/PushPrompt';
+import { pushSignOut, usePushRegistration } from '../push/usePush';
 import { useDraft } from './content/draft';
 import { useUi } from './ui';
+import { useUnreadOps } from './ops/hooks';
 
 interface NavItem {
   to: string;
@@ -14,14 +17,24 @@ interface NavItem {
   icon: string;
   end?: boolean;
   superOnly?: boolean;
+  group?: string;
 }
 
 const NAV: NavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: 'chart', end: true },
   { to: '/admin/bookings', label: 'Bookings', icon: 'calendar' },
   { to: '/admin/messages', label: 'Messages', icon: 'mail' },
-  { to: '/admin/content', label: 'Site content', icon: 'palette' },
-  { to: '/admin/sites', label: 'Sites', icon: 'globe', superOnly: true },
+  { to: '/admin/dispatch', label: 'Dispatch', icon: 'freight', group: 'Operations' },
+  { to: '/admin/jobs', label: 'Jobs', icon: 'layers', group: 'Operations' },
+  { to: '/admin/map', label: 'Live map', icon: 'gps', group: 'Operations' },
+  { to: '/admin/chat', label: 'Chat', icon: 'mail', group: 'Operations' },
+  { to: '/admin/vehicles', label: 'Vehicles', icon: 'truck', group: 'Operations' },
+  { to: '/admin/drivers', label: 'Drivers', icon: 'user', group: 'Operations' },
+  { to: '/admin/transporters', label: 'Transporters', icon: 'crossborder', group: 'Operations' },
+  { to: '/admin/settlements', label: 'Settlements', icon: 'tag', group: 'Operations' },
+  { to: '/admin/reports', label: 'Reports', icon: 'download', group: 'Operations' },
+  { to: '/admin/content', label: 'Site content', icon: 'palette', group: 'Website' },
+  { to: '/admin/sites', label: 'Sites', icon: 'globe', superOnly: true, group: 'Website' },
 ];
 
 export default function Shell({ children }: { children: ReactNode }) {
@@ -31,6 +44,8 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { confirm } = useUi();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
+  const unread = useUnreadOps();
+  usePushRegistration({ tenantId: tenant.id, uid: profile.uid, role: 'ops' });
 
   useEffect(() => setOpen(false), [loc.pathname]);
   useEffect(() => {
@@ -54,6 +69,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       }))
     )
       return;
+    await pushSignOut(tenant.id, profile.uid).catch(() => undefined);
     signOutSafe();
   };
 
@@ -80,19 +96,31 @@ export default function Shell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav className="adm-nav">
-          {items.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `adm-nav-link${isActive ? ' active' : ''}`}>
-              <Icon name={n.icon} size={18} />
-              <span>{n.label}</span>
-              {n.to === '/admin/content' && dirty ? <span className="adm-dot" title="Unsaved changes" aria-label="Unsaved changes" /> : null}
-            </NavLink>
+          {items.map((n, i) => (
+            <Fragment key={n.to}>
+              {n.group && n.group !== items[i - 1]?.group ? (
+                <div className="adm-nav-group" role="presentation">
+                  {n.group}
+                </div>
+              ) : null}
+              <NavLink to={n.to} end={n.end} className={({ isActive }) => `adm-nav-link${isActive ? ' active' : ''}`}>
+                <Icon name={n.icon} size={18} />
+                <span>{n.label}</span>
+                {n.to === '/admin/content' && dirty ? <span className="adm-dot" title="Unsaved changes" aria-label="Unsaved changes" /> : null}
+                {n.to === '/admin/chat' && unread ? (
+                  <span className="adm-nav-badge" aria-label={`${unread} unread`}>
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : null}
+              </NavLink>
+            </Fragment>
           ))}
           <a className="adm-nav-link" href={`/?site=${encodeURIComponent(tenant.id)}`} target="_blank" rel="noopener noreferrer">
             <Icon name="external" size={18} />
             <span>View site</span>
           </a>
         </nav>
-        <div className="adm-side-foot muted tiny">HaulPro admin</div>
+        <div className="adm-side-foot muted tiny">Exera Cargo admin</div>
       </aside>
       <div className="adm-backdrop" onClick={() => setOpen(false)} aria-hidden />
       <div className="adm-main-wrap">
@@ -107,6 +135,11 @@ export default function Shell({ children }: { children: ReactNode }) {
             <Icon name="menu" size={20} />
           </button>
           <div className="adm-top-title">{current?.label ?? 'Admin'}</div>
+          {unread && !loc.pathname.startsWith('/admin/chat') ? (
+            <NavLink to="/admin/chat" className="badge badge-accent adm-top-unread" title="Unread driver messages">
+              <Icon name="mail" size={12} /> {unread}
+            </NavLink>
+          ) : null}
           <div className="adm-top-right">
             {dirty ? (
               <NavLink to="/admin/content" className="badge adm-hide-xs" title="You have unsaved site changes">
@@ -120,6 +153,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               <Icon name={dataMode === 'firebase' ? 'shield' : 'bolt'} size={12} />
               {dataMode === 'firebase' ? 'Firebase' : 'Demo'}
             </span>
+            <PushPrompt className="btn btn-ghost btn-sm adm-hide-xs" />
             <span className="adm-user muted small" title={profile.email}>
               <Icon name="user" size={16} />
               <span className="adm-user-email">{profile.email}</span>

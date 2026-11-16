@@ -1,6 +1,6 @@
 import type { CountryCode, TenantConfig } from '../types';
 import { deepMerge } from '../merge';
-import { kopano } from './kopano';
+import { exera } from './exera';
 import { maluti } from './maluti';
 import { lankahaul } from './lankahaul';
 import { insightsLibrary } from './insights';
@@ -11,7 +11,7 @@ export { TENANT_DEFAULTS } from './defaults';
 
 /** Bundled demo sites (South Africa). Firestore docs deep-merge over these. */
 export const PRESETS: Record<string, TenantConfig> = {
-  kopano,
+  exera,
   maluti,
 };
 
@@ -20,13 +20,13 @@ export const PRESETS: Record<string, TenantConfig> = {
  * Sri Lanka is kept so the platform can also be sold into that market.
  */
 export const COUNTRY_TEMPLATES: Record<CountryCode, TenantConfig> = {
-  ZA: kopano,
+  ZA: exera,
   LK: { ...lankahaul, insights: insightsLibrary },
 };
 
 const envDefault = (import.meta.env.VITE_DEFAULT_TENANT as string | undefined) || '';
 /** Falls back to the first bundled preset if the env names a site that isn't bundled. */
-export const DEFAULT_TENANT_ID: string = PRESETS[envDefault] ? envDefault : 'kopano';
+export const DEFAULT_TENANT_ID: string = PRESETS[envDefault] ? envDefault : 'exera';
 
 /** Neutral defaults for a stored tenant of this country (no brand content). */
 export function tenantDefaults(country: CountryCode | undefined): TenantConfig {
