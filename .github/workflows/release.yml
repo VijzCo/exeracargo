@@ -163,10 +163,15 @@ jobs:
           if ! git rev-parse -q --verify HEAD^ >/dev/null; then native=1
           elif git diff --name-only HEAD^ HEAD | grep -qE '^(android/|capacitor\.config\.ts$)'; then native=1
           elif git diff HEAD^ HEAD -- package.json | grep -qE '^[+-].*"@(capacitor|capgo)/'; then native=1; fi
-          prev=$(curl -fsS "$ORIGIN/app-update/latest.json" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).apk.minVersionCode||0)}catch{console.log(0)}})' || echo 0)
+          prevjson=$(curl -fsS "$ORIGIN/app-update/latest.json" 2>/dev/null || echo '{}')
+          prev=$(echo "$prevjson" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).apk.minVersionCode||0)}catch{console.log(0)}})')
+          prevpush=$(echo "$prevjson" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).apk.push?1:0)}catch{console.log(0)}})')
+          # push on/off is compiled into the APK (google-services.json): a change needs the new APK
+          push=0; [ -f android/app/google-services.json ] && push=1
+          [ "$push" != "$prevpush" ] && native=1
           if [ "$native" = "1" ] || [ "$prev" = "0" ]; then min=$APP_VERSION_CODE; else min=$prev; fi
           echo "native changed: $native · minVersionCode: $min"
-          node scripts/update-manifest.mjs "$RUNNER_TEMP/android-dist" dist "$VERSION" "$ORIGIN" "$APP_VERSION_CODE" "$min" "$RUNNER_TEMP/out/exera-cargo-driver.apk"
+          node scripts/update-manifest.mjs "$RUNNER_TEMP/android-dist" dist "$VERSION" "$ORIGIN" "$APP_VERSION_CODE" "$min" "$RUNNER_TEMP/out/exera-cargo-driver.apk" "$push"
 
       # ── 3. Firebase deploy ──
       - name: Google Cloud login (keyless)

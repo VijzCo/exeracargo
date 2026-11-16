@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
-const [androidDist, siteDist, version, origin, versionCode, minVersionCode, apkPath] = process.argv.slice(2);
+const [androidDist, siteDist, version, origin, versionCode, minVersionCode, apkPath, push = '0'] = process.argv.slice(2);
 if (!apkPath) {
   console.error('usage: update-manifest.mjs <android-dist> <site-dist> <version> <origin> <versionCode> <minVersionCode> <apkPath>');
   process.exit(1);
@@ -63,6 +63,8 @@ const latest = {
     versionName: version,
     minVersionCode: Number(minVersionCode),
     size: apkSize,
+    /** native push compiled in (google-services.json present at build) */
+    push: push === '1',
   },
 };
 await writeFile(join(out, 'latest.json'), JSON.stringify(latest, null, 1));
