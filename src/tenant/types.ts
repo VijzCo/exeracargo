@@ -21,6 +21,7 @@ export type SectionKey =
   | 'faq'
   | 'trust'
   | 'logistics'
+  | 'story'
   | 'cta';
 
 export type VehicleType =
@@ -194,7 +195,34 @@ export interface TenantConfig {
   seo: { title: string; description: string; keywords: string };
   sections: { order: SectionKey[]; hidden: SectionKey[] };
   features: { insights: boolean; promotions: boolean; tracking: boolean; languageSwitcher: boolean };
+  /** Company details printed in the legal documents (Terms, Privacy, agreements) + optional text overrides. */
+  legal?: LegalSettings;
+  /** "Our story" block on the home page. */
+  story?: Story;
   updatedAt?: number;
+}
+
+export type LegalDocId = 'terms' | 'privacy' | 'driver' | 'hired' | 'booking' | 'transporter';
+
+export interface LegalSettings {
+  legalName?: string; // registered name, e.g. "Exera Cargo (Pty) Ltd"
+  regNo?: string; // CIPC registration number
+  vatNo?: string;
+  address?: string; // registered / physical address
+  email?: string; // legal & privacy contact
+  infoOfficer?: string; // POPIA Information Officer (name)
+  jurisdiction?: string; // e.g. "Gauteng Division of the High Court, Johannesburg"
+  gitLimit?: number; // liability cap per consignment in the booking terms (rand)
+  payTermsDays?: number; // transporter payment terms
+  /** Replace a document's default text (Markdown-lite: "## Heading", paragraphs, "- " bullets). Changing it bumps the version. */
+  overrides?: Partial<Record<LegalDocId, { body: string; version: string }>>;
+}
+
+export interface Story {
+  eyebrow?: string;
+  title: string;
+  body: string; // paragraphs separated by blank lines
+  values: { title: string; text: string }[];
 }
 
 // ── Bookings ─────────────────────────────────────────────────
@@ -329,6 +357,9 @@ export interface NewBooking {
   promoCode?: string;
   quote: Quote;
   lang: Lang;
+  /** Booking Terms + Privacy versions the customer accepted ("2026-11-16+2026-11-16") and when (ms). */
+  termsVersion?: string;
+  termsAcceptedAt?: number;
 }
 
 export interface Booking extends NewBooking {

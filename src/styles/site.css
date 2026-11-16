@@ -1137,3 +1137,15 @@
 .docs-grid li {
   margin-bottom: 4px;
 }
+
+/* ── our story ── */
+.story-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(20px, 4vw, 48px); align-items: start; }
+.story-p { color: var(--muted); font-size: 1.04rem; max-width: 62ch; }
+.story-values { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.story-values li { display: flex; flex-direction: column; gap: 4px; padding: 16px; }
+@media (max-width: 860px) {
+  .story-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .story-values { grid-template-columns: minmax(0, 1fr); }
+}

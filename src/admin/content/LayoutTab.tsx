@@ -15,6 +15,7 @@ export const ALL_SECTIONS: { key: SectionKey; label: string; desc: string }[] = 
   { key: 'insights', label: 'Insights', desc: 'Latest articles' },
   { key: 'logistics', label: 'Logistics', desc: 'Freight services & delivery speeds' },
   { key: 'trust', label: 'Trust badges', desc: 'Certifications & insurance' },
+  { key: 'story', label: 'Our story', desc: 'Who you are & what you stand for' },
   { key: 'areas', label: 'Service areas', desc: 'Coverage map & regions' },
   { key: 'testimonials', label: 'Testimonials', desc: 'Customer quotes' },
   { key: 'faq', label: 'FAQ', desc: 'Common questions' },

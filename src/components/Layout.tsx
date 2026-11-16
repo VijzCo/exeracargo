@@ -255,6 +255,9 @@ function Footer() {
         </span>
         <span className="tiny muted row" style={{ ['--gap' as string]: '14px' }}>
           {dataMode === 'demo' && <span className="badge badge-muted">Demo mode</span>}
+          <Link to="/legal/terms">Terms</Link>
+          <Link to="/legal/privacy">Privacy</Link>
+          <Link to="/legal/booking-terms">Booking terms</Link>
           <Link to="/admin">{t('footer.admin')}</Link>
         </span>
       </div>

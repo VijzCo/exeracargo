@@ -61,7 +61,7 @@ export const TENANT_DEFAULTS: TenantConfig = {
   },
   seo: { title: '', description: '', keywords: '' },
   sections: {
-    order: ['hero', 'stats', 'services', 'logistics', 'fleet', 'promotions', 'trust', 'process', 'insights', 'areas', 'testimonials', 'faq', 'cta'],
+    order: ['hero', 'stats', 'services', 'logistics', 'fleet', 'promotions', 'trust', 'story', 'process', 'insights', 'areas', 'testimonials', 'faq', 'cta'],
     hidden: [],
   },
   features: { insights: true, promotions: true, tracking: true, languageSwitcher: true },

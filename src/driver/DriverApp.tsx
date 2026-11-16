@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon';
 import { DriverProvider, useOnline, useToasts } from './ctx';
 import { mountDriverPwa } from './pwa';
 import Shell from './Shell';
+import { AcceptanceGate } from '../legal/AcceptanceGate';
 import './driver.css';
 
 type Auth = { state: 'loading' } | { state: 'out' } | { state: 'in'; driver: Driver };
@@ -130,7 +131,9 @@ export default function DriverApp() {
             notify,
           }}
         >
-          <Shell />
+          <AcceptanceGate role={auth.driver.external ? 'hired' : 'driver'} uid={auth.driver.id} name={auth.driver.name} onDecline={() => void driverSignOut()}>
+            <Shell />
+          </AcceptanceGate>
         </DriverProvider>
       )}
       <div className="drv-toasts" aria-hidden="true">

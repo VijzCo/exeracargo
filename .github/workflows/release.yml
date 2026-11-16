@@ -16,6 +16,7 @@
 #                                 updates only install over an app signed with the SAME key)
 # Variables (Settings → Secrets and variables → Actions → Variables), all optional:
 #   VITE_DEFAULT_TENANT (exera) · VITE_PUBLIC_ORIGIN (default https://<project-id>.web.app) · FUNCTIONS_REGION (africa-south1)
+#   VITE_GOOGLE_MAPS_EMBED_KEY (free Maps Embed API key for route maps; keyless embed without it)
 #   APP_LINK_HOST (default: host of VITE_PUBLIC_ORIGIN) · PLAY_SIGNING_SHA256 (only if published on Google Play) · DEPLOY_ONLY (e.g. "hosting,firestore" to skip functions on Spark)
 name: Release
 
@@ -89,6 +90,7 @@ jobs:
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
           VITE_DEFAULT_TENANT: ${{ vars.VITE_DEFAULT_TENANT || 'exera' }}
           VITE_FUNCTIONS_REGION: ${{ vars.FUNCTIONS_REGION || 'africa-south1' }}
+          VITE_GOOGLE_MAPS_EMBED_KEY: ${{ vars.VITE_GOOGLE_MAPS_EMBED_KEY }}
           VAR_ORIGIN: ${{ vars.VITE_PUBLIC_ORIGIN }}
           VAR_LINK_HOST: ${{ vars.APP_LINK_HOST }}
         run: |
@@ -99,7 +101,8 @@ jobs:
           echo "APP_LINK_HOST=$APP_LINK_HOST" >> "$GITHUB_ENV"
           {
             for k in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_STORAGE_BUCKET \
-                     VITE_FIREBASE_MESSAGING_SENDER_ID VITE_FIREBASE_APP_ID VITE_FIREBASE_VAPID_KEY VITE_DEFAULT_TENANT VITE_FUNCTIONS_REGION; do
+                     VITE_FIREBASE_MESSAGING_SENDER_ID VITE_FIREBASE_APP_ID VITE_FIREBASE_VAPID_KEY VITE_DEFAULT_TENANT VITE_FUNCTIONS_REGION \
+                     VITE_GOOGLE_MAPS_EMBED_KEY; do
               v="${!k}"; [ -n "$v" ] && echo "$k=$v"
             done
             echo "VITE_PUBLIC_ORIGIN=$ORIGIN"

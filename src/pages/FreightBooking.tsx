@@ -7,6 +7,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useTenant } from '../tenant/TenantProvider';
 import type { FreightDetails, FreightKind, NewBooking, Quote, ServiceLevel, TenantConfig, Vehicle } from '../tenant/types';
 import { createBooking } from '../lib/data';
+import { BookingTermsLinks, bookingTermsVersion } from '../legal/TermsConsent';
 import { chargeableKg, computeFreightQuote, findPromo, FREIGHT_LIMITS, validateFreight, volumetricKg } from '../lib/quote';
 import {
   borderPostsFor,
@@ -393,7 +394,7 @@ export default function FreightBooking({ switcher }: { switcher: ReactNode }) {
       if (!isValidPhone(f.phone, country.code)) e.phone = `Enter a valid ${country.name} number, e.g. ${country.phonePlaceholder}.`;
       if (f.email.trim() && !EMAIL_RE.test(f.email.trim())) e.email = 'Enter a valid email or leave it blank.';
       if (f.promoInput.trim() && f.promoInput.trim().toUpperCase() !== f.promoCode) e.promoInput = 'Tap “Apply” to use this code, or clear the field.';
-      if (!f.agree) e.agree = 'Please confirm you’ve read the terms.';
+      if (!f.agree) e.agree = 'Please accept the booking terms.';
     }
     return e;
   };
@@ -497,6 +498,8 @@ export default function FreightBooking({ switcher }: { switcher: ReactNode }) {
       rfq: form.rfq || undefined,
       quote,
       lang,
+      termsVersion: bookingTermsVersion(tenant),
+      termsAcceptedAt: Date.now(),
     };
     try {
       const { ref } = await createBooking(booking, tenant.logoText || tenant.name);
@@ -908,7 +911,9 @@ export default function FreightBooking({ switcher }: { switcher: ReactNode }) {
                     </label>
                     <label className="checkbox bk-agree">
                       <input type="checkbox" id="fr-agree" checked={form.agree} onChange={(e) => set('agree', e.target.checked)} aria-invalid={!!errors.agree} />
-                      <span>I understand this is an indicative quote. {tenant.booking.paymentNote}</span>
+                      <span>
+                        I understand this is an indicative quote. {tenant.booking.paymentNote} I accept the <BookingTermsLinks />.
+                      </span>
                     </label>
                     {errors.agree && <span className="field-error">{errors.agree}</span>}
                   </div>

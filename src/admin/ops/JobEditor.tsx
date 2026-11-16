@@ -6,12 +6,14 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { Icon } from '../../components/Icon';
 import PlacePicker from '../../components/PlacePicker';
 import { estimateRoadKm, findPlace, isValidPhone, normalisePhone } from '../../geo';
-import { assignJob, createJob, newId, saveFinance, updateJob, watchJob, watchJobFinance, type NewJob } from '../../ops/store';
-import type { BuyCost, Job, JobFinance, JobStop, Priority, StopKind } from '../../ops/types';
+import { assignJob, createJob, newId, saveFinance, touchPlace, updateJob, watchJob, watchJobFinance, type NewJob } from '../../ops/store';
+import { fmtLL, type LatLng } from '../../ops/maps';
+import type { BuyCost, Job, JobFinance, JobStop, Priority, SavedPlace, StopKind } from '../../ops/types';
 import { useTenant } from '../../tenant/TenantProvider';
 import { AreaField, errMsg, Field, PageHeader, Section, Spinner, useUi } from '../ui';
 import { CostPanel, costDraftError, costFromDraft, draftFromCost, withRateLine, type CostDraft } from './CostPanel';
-import { useDrivers, useJobs, useOpsUser, useToday, useTransporters, useVehicles } from './hooks';
+import { useDrivers, useJobs, useOpsUser, usePlaces, useToday, useTransporters, useVehicles } from './hooks';
+import { farFromTown, PinPickerModal, SavedPlaceSearch, SavePlaceModal, type PlaceDraft } from './PinTools';
 import { assignBlockers, suggestTitle } from './lib';
 import { AssignFields } from './widgets';
 import './ops-admin.css';
@@ -27,6 +29,8 @@ interface StopForm {
   reference: string;
   window: string;
   instructions: string;
+  /** Exact pin set by dispatch (map / pasted link / saved place). null = town only. */
+  pin: LatLng | null;
   /** Existing stop (keeps driver progress, POD, photos when editing). */
   orig?: JobStop;
 }
@@ -55,7 +59,8 @@ interface Form {
   cost: CostDraft;
 }
 
-const blankStop = (kind: StopKind): StopForm => ({ key: newId(), kind, placeId: '', address: '', contact: '', phone: '', cargo: '', reference: '', window: '', instructions: '' });
+const blankStop = (kind: StopKind): StopForm => ({ key: newId(), kind, placeId: '', address: '', contact: '', phone: '', cargo: '', reference: '', window: '', instructions: '', pin: null });
+const pinOf = (s?: { lat?: number; lng?: number; pinned?: boolean }): LatLng | null => (s?.pinned && typeof s.lat === 'number' && typeof s.lng === 'number' ? { lat: s.lat, lng: s.lng } : null);
 
 function stopsFrom(j: Partial<Job>, keepOrig: boolean): StopForm[] {
   if (j.stops?.length)
@@ -72,9 +77,10 @@ function stopsFrom(j: Partial<Job>, keepOrig: boolean): StopForm[] {
         reference: s.reference ?? '',
         window: s.window ?? '',
         instructions: s.instructions ?? '',
+        pin: pinOf(s),
         orig: keepOrig ? s : undefined,
       }));
-  const one = (kind: StopKind, s?: Partial<Job['pickup']>): StopForm => ({ ...blankStop(kind), placeId: s?.placeId ?? '', address: s?.address ?? '', contact: s?.contact ?? '', phone: s?.phone ?? '' });
+  const one = (kind: StopKind, s?: Partial<Job['pickup']>): StopForm => ({ ...blankStop(kind), placeId: s?.placeId ?? '', address: s?.address ?? '', contact: s?.contact ?? '', phone: s?.phone ?? '', pin: pinOf(s) });
   return [one('pickup', j.pickup), one('delivery', j.dropoff)];
 }
 
@@ -169,6 +175,9 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
   const { data: vehicles } = useVehicles();
   const { data: drivers } = useDrivers();
   const { data: transporters } = useTransporters();
+  const { data: places } = usePlaces();
+  const [pinFor, setPinFor] = useState<number | null>(null);
+  const [saveDraft, setSaveDraft] = useState<PlaceDraft | null>(null);
   const [f, setF] = useState<Form>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -189,6 +198,35 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
   const addStop = (kind: StopKind) => setF((p) => ({ ...p, stops: [...p.stops, blankStop(kind)] }));
 
   const multi = f.stops.length > 2 || f.hadStops;
+  const draftFor = (s: StopForm): PlaceDraft => {
+    const p = findPlace(s.placeId);
+    const who = f.customerCompany.trim() || f.customerName.trim();
+    return {
+      label: [who, p?.name ?? '', s.address.trim()].filter(Boolean).join(' – ').slice(0, 120),
+      customer: who || undefined,
+      address: s.address.trim(),
+      place: p?.name ?? s.orig?.place ?? '',
+      placeId: s.placeId || undefined,
+      region: p?.region,
+      lat: s.pin!.lat,
+      lng: s.pin!.lng,
+      contact: s.contact.trim() || undefined,
+      phone: s.phone.trim() || undefined,
+    };
+  };
+  const pickSaved = (i: number, p: SavedPlace) => {
+    const cur = f.stops[i];
+    setStop(i, {
+      placeId: p.placeId && findPlace(p.placeId) ? p.placeId : cur.placeId,
+      address: p.address || cur.address,
+      contact: p.contact ?? cur.contact,
+      phone: p.phone ?? cur.phone,
+      instructions: cur.instructions || p.notes || '',
+      pin: { lat: p.lat, lng: p.lng },
+    });
+    void touchPlace(tenant.id, p);
+    toast(`Filled from “${p.label}”`, 'info');
+  };
   const firstPick = f.stops.find((s) => s.kind === 'pickup');
   const lastDrop = [...f.stops].reverse().find((s) => s.kind === 'delivery');
   const pFrom = findPlace(firstPick?.placeId);
@@ -272,8 +310,10 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
       address: s.address.trim(),
       contact: s.contact.trim() || undefined,
       phone: s.phone.trim() ? normalisePhone(s.phone, country.code) : undefined,
-      lat: p?.lat,
-      lng: p?.lng,
+      // exact pin when dispatch set one, else the town centre (navigation then uses the street address)
+      lat: s.pin?.lat ?? p?.lat,
+      lng: s.pin?.lng ?? p?.lng,
+      pinned: !!s.pin,
       cargo: s.cargo.trim() || undefined,
       reference: s.reference.trim() || undefined,
       window: s.window.trim() || undefined,
@@ -293,7 +333,7 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
     }
     if (blockers.length && (vehicle || driver)) return toast(blockers[0], 'err');
     const stops = f.stops.map(toStop);
-    const end = (s: JobStop): Job['pickup'] => ({ placeId: s.placeId, place: s.place, region: s.region, address: s.address, contact: s.contact, phone: s.phone, lat: s.lat, lng: s.lng });
+    const end = (s: JobStop): Job['pickup'] => ({ placeId: s.placeId, place: s.place, region: s.region, address: s.address, contact: s.contact, phone: s.phone, lat: s.lat, lng: s.lng, pinned: s.pinned });
     const data: Omit<NewJob, 'status'> = {
       kind: f.kind,
       title: f.title.trim(),
@@ -423,6 +463,34 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
                         <Field label="Contact phone" error={liveErrors[`stop${i}Phone`]}>
                           <input className="input" type="tel" inputMode="tel" value={s.phone} maxLength={24} aria-invalid={!!liveErrors[`stop${i}Phone`] || undefined} onChange={(e) => setStop(i, { phone: e.target.value })} />
                         </Field>
+                        <div className="ops-pinrow">
+                          {s.pin ? (
+                            <span className="ops-chip ops-lvl-ok" title={fmtLL(s.pin)}>
+                              <Icon name="pin" size={12} /> Exact pin
+                            </span>
+                          ) : (
+                            <span className="ops-chip ops-lvl-none" title="Drivers navigate to the street address, or the town centre if there is none">
+                              Town only
+                            </span>
+                          )}
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPinFor(i)}>
+                            <Icon name="pin" size={14} /> {s.pin ? 'Move pin' : 'Pick on map / paste link'}
+                          </button>
+                          {s.pin ? (
+                            <>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSaveDraft(draftFor(s))}>
+                                <Icon name="star" size={14} /> Save to address book
+                              </button>
+                              <button type="button" className="adm-link ops-linkbtn small" onClick={() => setStop(i, { pin: null })}>
+                                Clear pin
+                              </button>
+                            </>
+                          ) : null}
+                          {s.pin && farFromTown(s.pin, s.placeId) ? <span className="small ops-text-warn">{farFromTown(s.pin, s.placeId)}</span> : null}
+                          <div style={{ flex: '1 1 100%' }}>
+                            <SavedPlaceSearch id={`saved-${s.key}`} places={places} customer={f.customerCompany || f.customerName} onPick={(p) => pickSaved(i, p)} />
+                          </div>
+                        </div>
                         {multi ? (
                           <>
                             <Field label={s.kind === 'pickup' ? 'Collect here' : 'Drop here'}>
@@ -563,6 +631,15 @@ function EditorForm({ initial, job, fin, fromBooking }: { initial: Form; job: Jo
           </Section>
         </div>
       </div>
+      <PinPickerModal
+        open={pinFor !== null}
+        onClose={() => setPinFor(null)}
+        title={pinFor !== null ? `Exact location · stop ${pinFor + 1}${f.stops[pinFor]?.placeId ? ` (${findPlace(f.stops[pinFor].placeId)?.name ?? ''})` : ''}` : ''}
+        initial={pinFor !== null ? f.stops[pinFor]?.pin ?? null : null}
+        placeId={pinFor !== null ? f.stops[pinFor]?.placeId : undefined}
+        onPick={(p) => pinFor !== null && setStop(pinFor, { pin: p })}
+      />
+      <SavePlaceModal open={!!saveDraft} onClose={() => setSaveDraft(null)} draft={saveDraft} />
     </form>
   );
 }

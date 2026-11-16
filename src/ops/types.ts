@@ -175,6 +175,40 @@ export interface JobLink {
 /** Placeholder driverId on a job that waits for its link to be opened. */
 export const LINK_DRIVER_PREFIX = 'link:';
 
+// ── maps: pins + address book ────────────────────────────────
+
+/** An exact location captured for a stop. */
+export interface StopPin {
+  lat: number;
+  lng: number;
+  acc?: number; // GPS accuracy (m)
+  at: number;
+  by: string; // uid
+  source: 'driver' | 'ops';
+  /** Driver's GPS differs (> 300 m) from dispatch's pin — waiting for dispatch to confirm. */
+  suggested?: boolean;
+}
+
+/** Saved customer location (`tenants/{t}/places/{id}`), dispatch only. */
+export interface SavedPlace {
+  id: string;
+  label: string; // "ABC Steel – Isando gate 3"
+  customer?: string;
+  address: string;
+  place: string; // town
+  placeId?: string;
+  region?: string;
+  lat: number;
+  lng: number;
+  contact?: string;
+  phone?: string;
+  notes?: string;
+  uses: number;
+  lastUsedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ── push notifications ───────────────────────────────────────
 
 export interface Device {
@@ -326,6 +360,8 @@ export interface JobStop extends Stop {
   phone?: string;
   lat?: number;
   lng?: number;
+  /** true = lat/lng is an exact pin set by dispatch (else it is only the town centre). */
+  pinned?: boolean;
   /** What is collected / dropped here (e.g. "12 pallets", "DN 4471"). */
   cargo?: string;
   reference?: string; // customer's delivery note / PO / order no.
@@ -350,8 +386,10 @@ export interface Job {
   title: string; // "10m³ sand · Midrand → Sandton"
   customer: { name: string; phone: string; company?: string };
   /** First pickup / final delivery. Kept in sync with `stops` for list views and the public tracking page. */
-  pickup: Stop & { contact?: string; phone?: string; lat?: number; lng?: number };
-  dropoff: Stop & { contact?: string; phone?: string; lat?: number; lng?: number };
+  pickup: Stop & { contact?: string; phone?: string; lat?: number; lng?: number; pinned?: boolean };
+  dropoff: Stop & { contact?: string; phone?: string; lat?: number; lng?: number; pinned?: boolean };
+  /** GPS spots captured by the driver on "Arrived", keyed by stop id ('p'/'d' for single-leg jobs). */
+  pins?: Record<string, StopPin>;
   /** Multi-stop jobs: every pickup and delivery in planned order (absent = single pickup → single drop). */
   stops?: JobStop[];
   /** Several jobs dispatched together to one truck/driver ("trip"). */

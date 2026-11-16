@@ -113,13 +113,33 @@ export const exera: TenantConfig = {
     ],
     restrictedWindows: { loadTypes: [], weekdaysOnly: true, windows: [] },
   },
+  story: {
+    eyebrow: 'Our story',
+    title: 'Built by people who move South Africa’s loads',
+    body: `Exera Cargo started with a simple frustration: customers waiting on a truck that “is on its way”, with no one able to say where it actually was. We set out to run haulage the way it should be run — on time, on record and on the phone when you need us.
+
+Today we move sand, stone and rubble with our tippers, run dedicated trucks and part-loads across Gauteng and the provinces, and take freight across the border into Lesotho, Eswatini, Botswana, Namibia, Zimbabwe and Mozambique. Every job is dispatched, tracked and closed with photo and signature proof of delivery, so you always know what happened to your load.
+
+We are a South African business that hires and trains locally, works with vetted owner-drivers and transport partners, and keeps every truck we send compliant, insured and roadworthy.`,
+    values: [
+      { title: 'On time, on record', text: 'Live status from dispatch to delivery, with photo + signature POD on every load.' },
+      { title: 'Safety first', text: 'Daily pre-trip inspections, trained drivers and no phone use while driving.' },
+      { title: 'Straight pricing', text: 'All-in quotes in rand up front — waiting time and extras agreed before we roll.' },
+      { title: 'Across the border', text: 'SADC cross-border runs with the right permits, paperwork and border know-how.' },
+    ],
+  },
+  legal: {
+    legalName: 'Exera Cargo (Pty) Ltd',
+    jurisdiction: 'Gauteng Division of the High Court, Johannesburg',
+    payTermsDays: 30,
+  },
   seo: {
     title: 'Exera Cargo — Tipper Hire, Truck Hire & Freight South Africa | Instant Quotes',
     description: 'Book tippers (6–18 cube), bakkies, 8-ton and superlink trucks, part-load pallets, courier and cross-border freight to Lesotho, Eswatini, Botswana, Namibia, Zimbabwe and Mozambique. Instant all-in ZAR quotes.',
     keywords: 'tipper hire johannesburg, truck hire south africa, freight quote, part load pallets, cross border trucking lesotho, rubble removal, sand delivery',
   },
   sections: {
-    order: ['hero', 'stats', 'services', 'logistics', 'fleet', 'trust', 'promotions', 'process', 'insights', 'areas', 'faq', 'cta'],
+    order: ['hero', 'stats', 'services', 'logistics', 'fleet', 'trust', 'story', 'promotions', 'process', 'insights', 'areas', 'faq', 'cta'],
     hidden: [],
   },
   features: { insights: true, promotions: true, tracking: true, languageSwitcher: true },

@@ -16,6 +16,8 @@ import { fmtTs, forAdvance, isOverdue, mapsLink, timeAgo } from './lib';
 import { HiredTag, MediaThumb, PriorityTag, PRIORITY_LABEL, TripTag } from './widgets';
 import { effectiveCost, margin, VAT_ZA } from './cost';
 import { LinkCard, SendLinkModal } from './ExtLink';
+import { RouteLinks, RouteMap } from '../../ops/RouteMap';
+import { jobRoutePoints, StopLocation } from './StopLocation';
 import './ops-admin.css';
 
 const ALL_STATUSES = Object.keys(JOB_STATUS_LABEL) as JobStatus[];
@@ -171,13 +173,24 @@ function Detail({ job: j, events }: { job: Job; events: JobEvent[] }) {
           <section className="card ops-block">
             <h2 className="adm-h2">{j.stops?.length ? `Route · ${j.stops.length} stops` : 'Route'}</h2>
             {j.stops?.length ? (
-              <MultiStops stops={j.stops} />
+              <MultiStops job={j} stops={j.stops} />
             ) : (
               <div className="ops-route">
-                <StopView label="Pickup" kind="pickup" s={j.pickup} />
-                <StopView label="Delivery" kind="dropoff" s={j.dropoff} />
+                <StopView job={j} id="p" label="Pickup" kind="pickup" s={j.pickup} />
+                <StopView job={j} id="d" label="Delivery" kind="dropoff" s={j.dropoff} />
               </div>
             )}
+            {(() => {
+              const pts = jobRoutePoints(j, j.stops?.length ? [...j.stops].sort((a, b) => a.seq - b.seq).map((x) => ({ id: x.id, s: x })) : [{ id: 'p', s: j.pickup }, { id: 'd', s: j.dropoff }]);
+              return (
+                <div className="ops-noprint">
+                  <div className="ops-routebar">
+                    <RouteLinks points={pts} />
+                  </div>
+                  <RouteMap points={pts} />
+                </div>
+              );
+            })()}
             <dl className="adm-dl">
               <Row k="Scheduled" v={`${j.scheduledDate} at ${j.scheduledTime}`} />
               <Row k="Cargo" v={j.cargo} />
@@ -442,7 +455,7 @@ function Stepper({ status, events }: { status: JobStatus; events: JobEvent[] }) 
   );
 }
 
-function StopView({ label, kind, s }: { label: string; kind: 'pickup' | 'dropoff'; s: Job['pickup'] }) {
+function StopView({ job, id, label, kind, s }: { job: Job; id: string; label: string; kind: 'pickup' | 'dropoff'; s: Job['pickup'] }) {
   return (
     <div className="ops-routestop">
       <span className={`ops-stop-dot ${kind}`} aria-hidden />
@@ -464,11 +477,7 @@ function StopView({ label, kind, s }: { label: string; kind: 'pickup' | 'dropoff
             ) : null}
           </div>
         ) : null}
-        {s.lat !== undefined && s.lng !== undefined ? (
-          <a className="adm-link tiny ops-noprint" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.address ? `${s.address}, ` : ''}${s.place}`)}`}>
-            Open in Maps
-          </a>
-        ) : null}
+        <StopLocation job={job} stopId={id} s={s} />
       </div>
     </div>
   );
@@ -481,7 +490,7 @@ const STOP_STATUS: Record<JobStop['status'], { label: string; lvl: string }> = {
   failed: { label: 'Failed', lvl: 'ops-lvl-err' },
 };
 
-function MultiStops({ stops }: { stops: JobStop[] }) {
+function MultiStops({ job, stops }: { job: Job; stops: JobStop[] }) {
   return (
     <ol className="ops-mstops">
       {[...stops]
@@ -521,6 +530,7 @@ function MultiStops({ stops }: { stops: JobStop[] }) {
                 </div>
               ) : null}
               {s.instructions ? <div className="small muted">“{s.instructions}”</div> : null}
+              <StopLocation job={job} stopId={s.id} s={s} />
               {s.arrivedAt || s.doneAt ? (
                 <div className="tiny muted">
                   {s.arrivedAt ? `Arrived ${fmtTs(s.arrivedAt)}` : ''}

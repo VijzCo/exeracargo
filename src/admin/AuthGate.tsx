@@ -5,6 +5,7 @@ import { useTenant } from '../tenant/TenantProvider';
 import type { AdminProfile } from '../tenant/types';
 import { canManage, dataMode, DEMO_PASSWORD, onAdminAuth, resetPassword, signIn, signOut } from '../lib/data';
 import { errMsg, Spinner } from './ui';
+import { AcceptanceGate } from '../legal/AcceptanceGate';
 
 const AdminCtx = createContext<AdminProfile | null>(null);
 
@@ -58,7 +59,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
   if (!profile) return <Login />;
   if (!canManage(profile, tenant.id)) return <NoAccess profile={profile} />;
-  return <AdminCtx.Provider value={profile}>{children}</AdminCtx.Provider>;
+  return (
+    <AdminCtx.Provider value={profile}>
+      <AcceptanceGate role="ops" uid={profile.uid} name={profile.email} onDecline={signOutSafe}>
+        {children}
+      </AcceptanceGate>
+    </AdminCtx.Provider>
+  );
 }
 
 function Brand() {

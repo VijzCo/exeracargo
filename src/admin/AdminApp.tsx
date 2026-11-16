@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AuthGate, { useAdmin, isSuper } from './AuthGate';
 import Shell from './Shell';
@@ -20,7 +20,10 @@ const ChatInbox = lazy(() => import('./ops/ChatInbox'));
 const LiveMap = lazy(() => import('./ops/LiveMap'));
 const Reports = lazy(() => import('./ops/Reports'));
 const Transporters = lazy(() => import('./ops/Transporters'));
+const Places = lazy(() => import('./ops/Places'));
 const Settlements = lazy(() => import('./ops/Settlements'));
+const Acceptances = lazy(() => import('./Acceptances'));
+const LegalPrint = lazy(() => import('./LegalPrint'));
 
 function SuperOnly({ children }: { children: JSX.Element }) {
   const p = useAdmin();
@@ -35,7 +38,28 @@ function Loading() {
   );
 }
 
+// After the console is idle, fetch the everyday screens in the background so the first click on
+// Dispatch / a job / New job / Vehicles / Drivers / Chat opens instantly instead of waiting for a download.
+let prefetched = false;
+function prefetchScreens() {
+  if (prefetched) return;
+  prefetched = true;
+  const go = () => {
+    void import('./ops/Dispatch');
+    void import('./ops/JobDetail');
+    void import('./ops/JobEditor');
+    void import('./ops/Vehicles');
+    void import('./ops/Drivers');
+    void import('./ops/ChatInbox');
+    void import('./Bookings');
+  };
+  const ric = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+  if (ric) ric(go, { timeout: 4000 });
+  else window.setTimeout(go, 2500);
+}
+
 export default function AdminApp() {
+  useEffect(prefetchScreens, []);
   return (
     <UiProvider>
       <div className="adm-root">
@@ -58,7 +82,10 @@ export default function AdminApp() {
                   <Route path="map" element={<LiveMap />} />
                   <Route path="reports" element={<Reports />} />
                   <Route path="transporters" element={<Transporters />} />
+                  <Route path="places" element={<Places />} />
                   <Route path="settlements" element={<Settlements />} />
+                  <Route path="consents" element={<Acceptances />} />
+                  <Route path="legal/:docId" element={<LegalPrint />} />
                   <Route path="content" element={<ContentEditor />} />
                   <Route path="content/:tab" element={<ContentEditor />} />
                   <Route

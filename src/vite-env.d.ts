@@ -2,6 +2,8 @@
 interface ImportMetaEnv {
   /** "1" when the Android build includes google-services.json (native push). */
   readonly VITE_ANDROID_PUSH?: string;
+  /** Optional free Google "Maps Embed API" key for route maps (keyless embed is used without it). */
+  readonly VITE_GOOGLE_MAPS_EMBED_KEY?: string;
   /** Release version of this web bundle (set by CI), used by the Android auto-updater. */
   readonly VITE_APP_VERSION?: string;
   readonly VITE_FIREBASE_API_KEY?: string;

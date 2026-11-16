@@ -17,6 +17,7 @@ const Track = lazy(() => import('./pages/Track'));
 const Admin = lazy(() => import('./admin/AdminApp'));
 const DriverApp = lazy(() => import('./driver/DriverApp'));
 const JobLinkPage = lazy(() => import('./driver/JobLinkPage'));
+const LegalPage = lazy(() => import('./pages/Legal'));
 
 const Router = import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : BrowserRouter;
 
@@ -48,6 +49,7 @@ export default function App() {
               <Route path="book" element={<Booking />} />
               <Route path="track" element={<Track />} />
               <Route path="contact" element={<ContactPage />} />
+              <Route path="legal/:slug" element={<LegalPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

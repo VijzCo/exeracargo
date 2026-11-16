@@ -735,6 +735,41 @@ export function Trust() {
   );
 }
 
+// ── OUR STORY ────────────────────────────────────────────────
+
+export function Story() {
+  const { tenant } = useTenant();
+  const s = tenant.story;
+  if (!s?.title || !s.body) return null;
+  return (
+    <section className="section" id="story">
+      <div className="container story-grid">
+        <div className="reveal">
+          <SectionHead eyebrow={s.eyebrow || 'Our story'} title={s.title} />
+          {s.body
+            .split(/\n\s*\n/)
+            .filter(Boolean)
+            .map((p, i) => (
+              <p key={i} className="story-p">
+                {p}
+              </p>
+            ))}
+        </div>
+        {s.values?.length ? (
+          <ul className="story-values reveal">
+            {s.values.map((v) => (
+              <li key={v.title} className="card">
+                <strong>{v.title}</strong>
+                <span className="small muted">{v.text}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 // ── TESTIMONIALS ─────────────────────────────────────────────
 
 export function Testimonials() {
@@ -837,6 +872,7 @@ export const SECTION_COMPONENTS: Record<SectionKey, () => JSX.Element | null> = 
   testimonials: Testimonials,
   faq: Faq,
   trust: Trust,
+  story: Story,
   logistics: LogisticsSection,
   cta: Cta,
 };

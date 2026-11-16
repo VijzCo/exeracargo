@@ -200,7 +200,9 @@ service cloud.firestore {
               && resource.data.driverId == request.auth.uid
               && request.resource.data.driverId == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys()
-                   .hasOnly(['status', 'stops', 'odoStart', 'odoEnd', 'actualKm', 'inspection', 'pod', 'failReason', 'updatedAt', 'lastEventAt'])
+                   .hasOnly(['status', 'stops', 'pins', 'odoStart', 'odoEnd', 'actualKm', 'inspection', 'pod', 'failReason', 'updatedAt', 'lastEventAt'])
+              // GPS spots captured on "Arrived" (one per stop)
+              && (!('pins' in request.resource.data) || (request.resource.data.pins is map && request.resource.data.pins.size() <= 32))
               && (!('stops' in request.resource.data) || (request.resource.data.stops is list && request.resource.data.stops.size() <= 30))
               && driverStep(resource.data.status, request.resource.data.status)
               // start reading is fixed once captured; end ≥ start and within a sane trip length
@@ -262,11 +264,35 @@ service cloud.firestore {
         }
       }
 
+      // click-wrap acceptance records (Terms / Privacy / Driver licence): append-only audit trail.
+      // id = "<uid>_<docId>_<version>" so a user can check their own records (even missing ones) without listing.
+      match /acceptances/{id} {
+        allow get: if signedIn() && id.matches(request.auth.uid + '_.*');
+        allow list: if canManage(t);
+        allow create: if signedIn() && tenantExists(t)
+          && request.resource.data.uid == request.auth.uid
+          && id == request.auth.uid + '_' + request.resource.data.docId + '_' + request.resource.data.version
+          && request.resource.data.keys().hasOnly(['uid', 'role', 'name', 'docId', 'version', 'acceptedAt', 'userAgent', 'appVersion', 'method'])
+          && request.resource.data.role in ['ops', 'driver', 'hired']
+          && request.resource.data.docId in ['terms', 'privacy', 'driver', 'hired', 'booking', 'transporter']
+          && str(request.resource.data.version, 8, 20)
+          && str(request.resource.data.name, 0, 120)
+          && str(request.resource.data.userAgent, 0, 300)
+          && str(request.resource.data.appVersion, 0, 40)
+          && request.resource.data.method == 'clickwrap'
+          && request.resource.data.acceptedAt == request.time;
+        allow update, delete: if false;
+      }
+
       // ── dispatch-only commercial data ──
       match /transporters/{id} {
         allow read, write: if canManage(t);
       }
       match /finance/{jobId} {
+        allow read, write: if canManage(t);
+      }
+      // customer address book (saved exact locations)
+      match /places/{id} {
         allow read, write: if canManage(t);
       }
       match /settlements/{id} {
@@ -346,7 +372,7 @@ service cloud.firestore {
                               'date', 'time', 'distanceKm', 'trips', 'quote', 'lang', 'ref', 'status', 'createdAt', 'updatedAt'])
         && d.keys().hasOnly(['tenantId', 'kind', 'customer', 'vehicleId', 'vehicleName', 'serviceId', 'loadType', 'pickup', 'dropoff',
                              'recipient', 'freight', 'rfq', 'date', 'time', 'distanceKm', 'trips', 'notes', 'promoCode', 'quote', 'lang',
-                             'ref', 'status', 'createdAt', 'updatedAt', 'serverCreatedAt'])
+                             'ref', 'status', 'createdAt', 'updatedAt', 'serverCreatedAt', 'termsVersion', 'termsAcceptedAt'])
         && d.tenantId == t
         && d.kind in ['vehicle', 'freight']
         && d.status == 'pending'
@@ -371,7 +397,9 @@ service cloud.firestore {
         && d.lang in ['en', 'si', 'ta', 'af', 'zu']
         && d.createdAt is int
         && d.updatedAt is int
-        && (!('serverCreatedAt' in d) || d.serverCreatedAt == request.time);
+        && (!('serverCreatedAt' in d) || d.serverCreatedAt == request.time)
+        && optStr(d, 'termsVersion', 40)
+        && (!('termsAcceptedAt' in d) || d.termsAcceptedAt is int);
     }
 
     function validCustomer(c) {

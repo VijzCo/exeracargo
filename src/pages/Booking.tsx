@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useTenant } from '../tenant/TenantProvider';
 import type { NewBooking, Quote, TenantConfig, Vehicle, VehicleType } from '../tenant/types';
 import { createBooking } from '../lib/data';
+import { BookingTermsLinks, bookingTermsVersion } from '../legal/TermsConsent';
 import { computeQuote, findPromo, hasRestrictionsOn, isRestrictedSlot, timeSlots, type HireMode } from '../lib/quote';
 import { estimateRoadKm, findPlace, findPlaceByName, isValidPhone, normalisePhone, type CountryInfo, type Place } from '../geo';
 import { telLink, waLink } from '../lib/wa';
@@ -287,7 +288,7 @@ function validateStep(step: number, f: Form, { tenant, minDT, country }: Ctx): E
     if (f.email.trim() && !EMAIL_RE.test(f.email.trim())) e.email = 'Enter a valid email or leave it blank.';
     if (f.promoInput.trim() && f.promoInput.trim().toUpperCase() !== f.promoCode)
       e.promoInput = 'Tap “Apply” to use this code, or clear the field.';
-    if (!f.agree) e.agree = 'Please confirm you’ve read the payment terms.';
+    if (!f.agree) e.agree = 'Please accept the payment and booking terms.';
   }
   return e;
 }
@@ -491,6 +492,8 @@ function VehicleBooking({ switcher }: { switcher: ReactNode }) {
       promoCode: promo?.code ? promo.code.toUpperCase() : undefined,
       quote,
       lang,
+      termsVersion: bookingTermsVersion(tenant),
+      termsAcceptedAt: Date.now(),
     };
 
     try {
@@ -1415,7 +1418,7 @@ function StepDetails({
               onChange={(e) => set('agree', e.target.checked)}
             />
             <span className="small">
-              I understand this is an indicative quote. {paymentNote}
+              I understand this is an indicative quote. {paymentNote} I accept the <BookingTermsLinks />.
             </span>
           </label>
           {errors.agree && (

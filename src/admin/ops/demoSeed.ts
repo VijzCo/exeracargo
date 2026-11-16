@@ -1,5 +1,5 @@
 // Demo mode only: two transporters (mixed rate cards), one hired truck and one hired driver.
-import { createDriverLogin, opsMode, saveDriver, saveTransporter, saveVehicle } from '../../ops/store';
+import { createDriverLogin, opsMode, savePlace, saveDriver, saveTransporter, saveVehicle } from '../../ops/store';
 import type { Transporter } from '../../ops/types';
 
 const iso = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
@@ -82,4 +82,18 @@ export async function seedHiredDemo(t: string, country: 'ZA' | 'LK'): Promise<vo
     transporterName: a.name,
     defaultVehicleId: 'vh-ridge1',
   });
+}
+
+/** Demo mode only: three saved customer locations for the address book (South Africa). */
+export async function seedPlacesDemo(t: string, country: 'ZA' | 'LK'): Promise<void> {
+  if (opsMode !== 'demo' || country !== 'ZA') return;
+  const flag = `hp:ops:${t}:places-seeded`;
+  if (localStorage.getItem(flag)) return;
+  localStorage.setItem(flag, '1');
+  const rows = [
+    { id: 'pl-abc-isando', label: 'ABC Steel – Isando gate 3', customer: 'ABC Steel', address: '14 Electron Ave, gate 3', place: 'Isando', placeId: 'za-gp-isando', region: 'Gauteng', lat: -26.13702, lng: 28.20841, contact: 'Themba', phone: '+27115550110', notes: 'Weighbridge at gate 3. Hard hat + vest.', uses: 6 },
+    { id: 'pl-buildit-midrand', label: 'BuildIt DC – Midrand', customer: 'BuildIt', address: '2 Lever Rd, Midrand DC', place: 'Midrand', placeId: 'za-gp-midrand', region: 'Gauteng', lat: -25.99381, lng: 28.13042, contact: 'Receiving', phone: '+27115550220', notes: 'Bookings 07:00–15:00 only.', uses: 3 },
+    { id: 'pl-port-durban', label: 'Durban Container Terminal – Pier 2', customer: 'Transnet', address: 'Bayhead Rd, Pier 2', place: 'Durban Harbour', placeId: 'za-kzn-durban-port', region: 'KwaZulu-Natal', lat: -29.87695, lng: 31.02315, notes: 'Port permit + TAP slot required.', uses: 1 },
+  ];
+  for (const r of rows) await savePlace(t, r);
 }

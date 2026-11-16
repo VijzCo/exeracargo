@@ -2067,3 +2067,13 @@
   color: var(--muted);
   font-size: 0.92rem;
 }
+
+.drv-nav-target {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.drv-terms { margin-top: 10px; font-size: 0.9rem; }
+.drv-terms summary { cursor: pointer; color: var(--primary); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.drv-terms .legal-text { padding: 6px 2px 0; }

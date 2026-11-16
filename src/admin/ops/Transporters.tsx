@@ -285,6 +285,11 @@ function TransporterDrawer({ transporter, onClose, onCreated }: { transporter: T
               <Icon name="trash" size={16} /> Delete
             </button>
           ) : null}
+          {!isNew && transporter ? (
+            <Link className="btn btn-ghost btn-sm" to={`/admin/legal/transporter?transporter=${encodeURIComponent(transporter.id)}`}>
+              <Icon name="contract" size={16} /> Agreement
+            </Link>
+          ) : null}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             Close
           </button>

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { advanceJob, getMedia, watchJob, watchJobEvents, type AdvanceExtra } from '../ops/store';
 import { currentPosition } from '../ops/image';
+import { arrivalPin, driverPin, navUrl, stopTarget, TARGET_LABEL, wazeUrl } from '../ops/maps';
+import { RouteLinks, RouteMap } from '../ops/RouteMap';
 import { JOB_FLOW, JOB_STATUS_LABEL, type FleetUnit, type Job, type JobEvent, type JobStatus, type JobStop } from '../ops/types';
 import JobStatusPill from '../ops/JobStatusPill';
 import Chat from '../ops/Chat';
@@ -11,7 +13,7 @@ import { Icon } from '../components/Icon';
 import { fmtDate, fmtKm, fmtTime, isoToday, queued, useDriver } from './ctx';
 import { CloseTripSheet, FailSheet, LoadedSheet, PodSheet, StartTripSheet, StopFailSheet, type AdvanceFn } from './JobFlows';
 import { Confirm, Empty, Sheet } from './ui';
-import { isMultiStop, ordered, patchStop, remainingAfter, statusAfterFailedStop, stopAction, stopLabel, tripJobs, tripPrev } from './stops';
+import { currentStop, isMultiStop, ordered, patchStop, remainingAfter, statusAfterFailedStop, stopAction, stopLabel, tripJobs, tripPrev } from './stops';
 
 type Flow = 'confirm' | 'start' | 'loaded' | 'pod' | 'close' | 'fail' | 'stopfail' | 'chat';
 
@@ -118,9 +120,19 @@ export default function JobDetail({ jobs, vehicles }: { jobs: Job[] | null; vehi
       try {
         const pos = await currentPosition(3000);
         const ll = pos ? { lat: pos.lat, lng: pos.lng } : {};
+        // "Arrived": remember the exact spot for next time (never overwrites dispatch's pin)
+        let pin: AdvanceExtra['pin'];
+        if (next === 'at_pickup' || next === 'at_delivery') {
+          const st = isMultiStop(job) ? currentStop(job) : undefined;
+          const stopId = st ? st.id : next === 'at_pickup' ? 'p' : 'd';
+          const target = st ?? (next === 'at_pickup' ? job.pickup : job.dropoff);
+          const p = arrivalPin(target, job.pins?.[stopId], pos, user.uid);
+          if (p) pin = { stopId, pin: p };
+        }
         const x: AdvanceExtra = {
           ...extra,
           ...ll,
+          pin,
           pod: extra.pod && { ...extra.pod, ...ll },
           odoStart: extra.odoStart && { ...extra.odoStart, ...ll },
           odoEnd: extra.odoEnd && { ...extra.odoEnd, ...ll },
@@ -280,17 +292,19 @@ export default function JobDetail({ jobs, vehicles }: { jobs: Job[] | null; vehi
           </h2>
           <ol className="drv-stoplist">
             {ordered(job.stops!).map((st, i) => (
-              <MultiStop key={st.id} n={i + 1} stop={st} current={!final && action?.stop?.id === st.id} />
+              <MultiStop key={st.id} job={job} n={i + 1} stop={st} current={!final && action?.stop?.id === st.id} />
             ))}
           </ol>
         </section>
       ) : (
         <section className="drv-card drv-route" aria-label="Route">
-          <StopBlock label="Pickup" tone="a" stop={job.pickup} current={!towardsDrop && !final} />
+          <StopBlock job={job} stopId="p" label="Pickup" tone="a" stop={job.pickup} current={!towardsDrop && !final} />
           <div className="drv-route-sep" aria-hidden="true" />
-          <StopBlock label="Delivery" tone="b" stop={job.dropoff} current={towardsDrop && !final} />
+          <StopBlock job={job} stopId="d" label="Delivery" tone="b" stop={job.dropoff} current={towardsDrop && !final} />
         </section>
       )}
+
+      {!final ? <DriverRoute job={job} towardsDrop={towardsDrop} /> : null}
 
       <section className="drv-card">
         <h2 className="drv-h">Load & customer</h2>
@@ -563,7 +577,7 @@ const STOP_STATE: Record<JobStop['status'], string> = {
   failed: 'Not done',
 };
 
-function MultiStop({ n, stop, current }: { n: number; stop: JobStop; current: boolean }) {
+function MultiStop({ job, n, stop, current }: { job: Job; n: number; stop: JobStop; current: boolean }) {
   const [open, setOpen] = useState(current);
   useEffect(() => setOpen(current), [current]);
   const finished = stop.status === 'done' || stop.status === 'failed';
@@ -612,27 +626,29 @@ function MultiStop({ n, stop, current }: { n: number; stop: JobStop; current: bo
               )}
             </div>
           )}
-          {!finished && <NavButtons stop={stop} label={`${stopLabel(stop)} ${n}`} />}
+          {!finished && <NavButtons job={job} stopId={stop.id} stop={stop} label={`${stopLabel(stop)} ${n}`} />}
         </div>
       )}
     </li>
   );
 }
 
-function NavButtons({ stop, label }: { stop: Job['pickup']; label: string }) {
-  const q = `${stop.address}, ${stop.place}${stop.region ? `, ${stop.region}` : ''}`;
-  const hasLl = typeof stop.lat === 'number' && typeof stop.lng === 'number';
-  const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hasLl ? `${stop.lat},${stop.lng}` : q)}`;
-  const waze = hasLl ? `https://waze.com/ul?ll=${stop.lat},${stop.lng}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(q)}&navigate=yes`;
+function NavButtons({ job, stopId, stop, label }: { job: Job; stopId: string; stop: Job['pickup']; label: string }) {
+  const t = stopTarget(stop, driverPin(job, stopId));
   return (
-    <div className="drv-nav">
-      <a href={gmaps} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label} with Google Maps`}>
-        <Icon name="gps" size={18} /> Google Maps
-      </a>
-      <a href={waze} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label} with Waze`}>
-        <Icon name="external" size={18} /> Waze
-      </a>
-    </div>
+    <>
+      <div className="drv-nav">
+        <a href={navUrl(t.q)} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label} with Google Maps`}>
+          <Icon name="gps" size={18} /> Google Maps
+        </a>
+        <a href={wazeUrl(t)} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label} with Waze`}>
+          <Icon name="external" size={18} /> Waze
+        </a>
+      </div>
+      <span className="small muted drv-nav-target">
+        <Icon name="pin" size={12} /> {t.kind === 'town' ? 'Town centre only — call the contact for directions' : TARGET_LABEL[t.kind]}
+      </span>
+    </>
   );
 }
 
@@ -660,14 +676,7 @@ function Stepper({ idx }: { idx: number }) {
   );
 }
 
-function StopBlock({ label, tone, stop, current }: { label: string; tone: 'a' | 'b'; stop: Job['pickup']; current: boolean }) {
-  const q = `${stop.address}, ${stop.place}${stop.region ? `, ${stop.region}` : ''}`;
-  const dest = typeof stop.lat === 'number' && typeof stop.lng === 'number' ? `${stop.lat},${stop.lng}` : q;
-  const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
-  const waze =
-    typeof stop.lat === 'number' && typeof stop.lng === 'number'
-      ? `https://waze.com/ul?ll=${stop.lat},${stop.lng}&navigate=yes`
-      : `https://waze.com/ul?q=${encodeURIComponent(q)}&navigate=yes`;
+function StopBlock({ job, stopId, label, tone, stop, current }: { job: Job; stopId: string; label: string; tone: 'a' | 'b'; stop: Job['pickup']; current: boolean }) {
   return (
     <div className={`drv-stop ${current ? 'cur' : ''}`}>
       <div className="drv-stop-head">
@@ -694,14 +703,7 @@ function StopBlock({ label, tone, stop, current }: { label: string; tone: 'a' | 
           )}
         </div>
       )}
-      <div className="drv-nav">
-        <a href={gmaps} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label.toLowerCase()} with Google Maps`}>
-          <Icon name="gps" size={18} /> Google Maps
-        </a>
-        <a href={waze} target="_blank" rel="noreferrer" className="btn drv-btn drv-nav-btn" aria-label={`Navigate to ${label.toLowerCase()} with Waze`}>
-          <Icon name="external" size={18} /> Waze
-        </a>
-      </div>
+      <NavButtons job={job} stopId={stopId} stop={stop} label={label.toLowerCase()} />
     </div>
   );
 }
@@ -716,4 +718,28 @@ function MediaImg({ tenantId, id, alt, className }: { tenantId: string; id: stri
     };
   }, [tenantId, id]);
   return src ? <img src={src} alt={alt} className={className} /> : null;
+}
+
+/** Whole route: remaining stops from the phone's current location + the drawn road route. */
+function DriverRoute({ job, towardsDrop }: { job: Job; towardsDrop: boolean }) {
+  const all = isMultiStop(job)
+    ? ordered(job.stops!).map((s) => ({ id: s.id, s, left: s.status === 'pending' || s.status === 'arrived' }))
+    : [
+        { id: 'p', s: job.pickup as Job['pickup'], left: !towardsDrop },
+        { id: 'd', s: job.dropoff as Job['pickup'], left: true },
+      ];
+  const pts = (rows: typeof all) => rows.map((r) => stopTarget(r.s, driverPin(job, r.id)).q);
+  const remaining = all.filter((r) => r.left);
+  if (!remaining.length) return null;
+  return (
+    <section className="drv-card" aria-label="Route">
+      <h2 className="drv-h">
+        Route <span className="muted small">({remaining.length} stop{remaining.length === 1 ? '' : 's'} left)</span>
+      </h2>
+      <div className="stack" style={{ gap: 8 }}>
+        <RouteLinks points={pts(remaining)} fromCurrent btnClass="btn drv-btn btn-block" label={remaining.length > 1 ? 'Navigate all remaining stops' : 'Navigate'} />
+        <RouteMap points={pts(all)} btnClass="btn btn-ghost btn-block" />
+      </div>
+    </section>
+  );
 }

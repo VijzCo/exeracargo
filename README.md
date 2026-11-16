@@ -147,6 +147,23 @@ Keep the `.jks` file and its passwords safe. Without them you can't update the a
 
 **Getting it onto drivers' phones:** share the APK (WhatsApp/Drive, with "Install unknown apps" allowed), or publish it on Google Play (internal testing is fastest). App link host: `APP_LINK_HOST` env/variable (default `exeracargo.web.app`). Custom-domain links need that domain's `assetlinks.json` as well.
 
+## Terms & consent
+
+**Method: click-wrap after sign-in.** People sign in first, then accept, so each acceptance is tied to a verified identity (uid, name, email or phone). The record holds the exact document version and a server timestamp. That makes it an enforceable audit record under ECTA. Pages before sign-in (website, booking form, login) only *link* the documents. Customers, who don't sign in, tick a required box on the booking form; the booking stores `termsVersion` + `termsAcceptedAt`.
+
+| Who | Must accept | Where |
+|---|---|---|
+| Dispatchers | Platform Terms of Use + Privacy Notice | Gate after `/admin` sign-in |
+| Drivers | Driver App Licence + Privacy Notice | Gate after `/driver` sign-in |
+| Hired drivers (one-time link) | Hired Driver Terms + Privacy Notice | Checkbox on the `/j/…` page, recorded at claim |
+| Customers | Booking Terms + Privacy Notice | Checkbox on Book / Freight forms |
+| Transporters | Transporter Agreement | Printed and signed: Transporters → *Agreement* |
+
+- Documents live in `src/legal/docs.ts` (versioned `yyyy-mm-dd`). Company details and optional text overrides are under **Site content → Legal & story**. Saving new text gives it a new version, so everyone is asked again.
+- Records: `tenants/{t}/acceptances/{uid}_{doc}_{version}`. They are append-only (rules forbid update and delete) and listed under **Operations → Consents** with CSV export.
+- Public pages: `/legal/terms`, `/legal/privacy`, `/legal/booking-terms`, linked in the site footer.
+- **The texts are drafts.** Have a South African attorney review them (POPIA, ECTA, CPA, cross-border) and fill in the company details before going live.
+
 ## Auto-deploy and app auto-update (GitHub → Firebase)
 
 Every push to `main` runs `.github/workflows/release.yml`. It builds a signed APK and deploys the website, rules, indexes and functions. It also publishes the app update on Firebase Hosting and creates a GitHub Release `v1.0.<run>` with the APK attached.
@@ -217,6 +234,15 @@ Push needs **Cloud Functions**, which run only on the pay-as-you-go **Blaze** pl
 6. Dispatchers click **🔔 Turn on notifications** in the console header, once per browser. Drivers are asked automatically after signing in to the app.
 
 **PIN reset** also uses a function (`resetDriverPin`). Dispatch sets a new PIN and the driver keeps their account, chat and history. The driver's other devices are signed out.
+
+## Maps (free — no paid Google APIs)
+
+- **Navigate / Open full route:** Google Maps and Waze links with the stops filled in. Each link holds up to 9 stops; longer routes are split into parts. In the driver app the route starts at the phone's location and covers only the stops still to do.
+- **Route map:** Job detail (console and driver app) → **Show route map** loads an embedded Google map with the road route. It only loads when opened, which keeps pages fast. If `VITE_GOOGLE_MAPS_EMBED_KEY` is set, the official Maps Embed API is used; it is free with unlimited use. Without the key, Google's keyless embed is used. To get a key: Google Cloud console → APIs & Services → enable **Maps Embed API** → Credentials → Create API key. Restrict it to your website domains (`https://exeracargo.co.za/*`, `https://<project>.web.app/*`, `https://localhost/*` for the app) and to the Maps Embed API only. Then set it in `.env.local` and as the GitHub variable `VITE_GOOGLE_MAPS_EMBED_KEY`.
+- **Exact pins:** in the job form, each stop has **Pick on map / paste link**. You can click the OpenStreetMap map, drag the pin, or paste a full Google Maps link or `lat, lng`. Short `maps.app.goo.gl` links can't be read: open them and copy the full address-bar URL. Pins more than 50 km from the chosen town are flagged.
+- **Driver GPS spot:** when a driver taps **Arrived**, the phone's position is saved on the job (`job.pins[stopId]`, `p`/`d` for single-leg jobs) if the stop had no exact pin. If dispatch already pinned the stop and the driver is more than 300 m away (with GPS accurate to 50 m or better), it is stored as a suggestion. Dispatch's pin is never overwritten. On the job page, dispatch can choose **Use as exact location** or **Save to address book**.
+- **Navigation order:** dispatch's exact pin → driver's GPS spot → street address → town centre.
+- **Address book** (Operations → Address book, `tenants/{t}/places`, dispatch only): saved customer sites with pin, contact and notes. In the job form, **Saved places** fills a stop; the job's customer is listed first, then the most-used places.
 
 ## Data model (Firestore)
 

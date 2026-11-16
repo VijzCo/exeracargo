@@ -23,6 +23,8 @@ import type {
   Settlement,
   Thread,
   Transporter,
+  SavedPlace,
+  StopPin,
 } from './types';
 import { LINK_DRIVER_PREFIX } from './types';
 import type { BookingStatus } from '../tenant/types';
@@ -195,6 +197,7 @@ const P = {
   finance: (t: string) => `tenants/${t}/finance`,
   settlements: (t: string) => `tenants/${t}/settlements`,
   devices: (t: string) => `tenants/${t}/devices`,
+  places: (t: string) => `tenants/${t}/places`,
   links: () => `jobLinks`,
 };
 
@@ -470,6 +473,8 @@ export async function assignJob(
 export interface AdvanceExtra {
   /** Multi-stop jobs: the updated stop list (status / POD / photos of the stop just handled). */
   stops?: JobStop[];
+  /** GPS spot captured on "Arrived" (merged into job.pins by stop id). */
+  pin?: { stopId: string; pin: StopPin };
   note?: string;
   /** Photos taken at this step (e.g. load photos) — recorded on the timeline event. */
   photoIds?: string[];
@@ -508,6 +513,7 @@ export async function advanceJob(t: string, job: Job, next: JobStatus, user: Ops
   if (x.inspection) patch.inspection = x.inspection;
   if (x.pod) patch.pod = x.pod;
   if (x.stops) patch.stops = x.stops;
+  if (x.pin) patch.pins = { ...(job.pins ?? {}), [x.pin.stopId]: x.pin.pin };
   if (x.failReason) patch.failReason = x.failReason.slice(0, 300);
   const ev: Omit<JobEvent, 'id'> = { status: next, at: now, by: user.uid, byName: user.name, role: user.role, note: x.note?.slice(0, 1000), photoIds: x.photoIds?.slice(0, 6), lat: x.lat, lng: x.lng };
 
@@ -913,7 +919,7 @@ export function withEnds<T extends Partial<Job>>(j: T): T {
   const ordered = [...stops].sort((a, b) => a.seq - b.seq);
   const pick = (k: JobStop['kind']) => (k === 'pickup' ? ordered.find((s) => s.kind === k) : [...ordered].reverse().find((s) => s.kind === k));
   const end = (s: JobStop | undefined) =>
-    s ? { address: s.address, placeId: s.placeId, place: s.place, region: s.region, contact: s.contact, phone: s.phone, lat: s.lat, lng: s.lng } : undefined;
+    s ? { address: s.address, placeId: s.placeId, place: s.place, region: s.region, contact: s.contact, phone: s.phone, lat: s.lat, lng: s.lng, pinned: s.pinned } : undefined;
   return { ...j, stops: ordered.map((s, i) => ({ ...s, seq: i })), pickup: end(pick('pickup')) ?? j.pickup, dropoff: end(pick('delivery')) ?? j.dropoff };
 }
 
@@ -1235,4 +1241,53 @@ export async function migrateJobPrices(t: string, jobs: Job[], finance: JobFinan
     n++;
   }
   return n;
+}
+
+// ═════════════════════════════════════════════════════════════
+// Maps — exact stop pins + customer address book (free: no paid map APIs)
+// ═════════════════════════════════════════════════════════════
+
+export function watchPlaces(t: string, cb: (r: SavedPlace[]) => void): Unsub {
+  const sort = (a: SavedPlace, b: SavedPlace) => (b.uses ?? 0) - (a.uses ?? 0) || (a.label ?? '').localeCompare(b.label ?? '');
+  if (opsMode === 'demo') return demoWatch<SavedPlace>(P.places(t), cb, undefined, sort);
+  return fbWatch<SavedPlace>((fs, db) => fs.query(fs.collection(db, P.places(t)), fs.limit(1000)), (r) => cb(r.sort(sort)));
+}
+export async function savePlace(t: string, x: Omit<SavedPlace, 'createdAt' | 'updatedAt' | 'uses'> & { createdAt?: number; uses?: number }): Promise<void> {
+  const now = Date.now();
+  await set(P.places(t), x.id, { ...x, uses: x.uses ?? 0, createdAt: x.createdAt ?? now, updatedAt: now } as unknown as Record<string, unknown>);
+}
+export async function deletePlace(t: string, id: string): Promise<void> {
+  if (opsMode === 'demo') return demoDel(P.places(t), id);
+  const { fs, db } = await full();
+  await fs.deleteDoc(fs.doc(db, P.places(t), id));
+}
+/** Count a use (most-used places are offered first). */
+export async function touchPlace(t: string, p: Pick<SavedPlace, 'id' | 'uses'>): Promise<void> {
+  const now = Date.now();
+  if (opsMode === 'demo') return void (await set(P.places(t), p.id, { uses: (p.uses ?? 0) + 1, lastUsedAt: now }, true));
+  const { fs, db } = await full();
+  await fs.setDoc(fs.doc(db, P.places(t), p.id), { uses: fs.increment(1), lastUsedAt: now }, { merge: true }).catch(() => undefined);
+}
+
+/**
+ * Dispatch: make a GPS spot (usually the driver's) the stop's exact location.
+ * Single-leg ids are 'p' / 'd'; the driver's pin for that stop is cleared.
+ */
+export async function applyStopPin(t: string, job: Job, stopId: string, ll: { lat: number; lng: number }, user: OpsUser): Promise<void> {
+  const now = Date.now();
+  const patch: Record<string, unknown> = { updatedAt: now };
+  if (job.stops?.length) patch.stops = withEnds({ stops: job.stops.map((s) => (s.id === stopId ? { ...s, lat: ll.lat, lng: ll.lng, pinned: true } : s)) }).stops;
+  if (job.stops?.length) Object.assign(patch, withEnds({ ...job, stops: patch.stops as JobStop[] }));
+  else if (stopId === 'p') patch.pickup = { ...job.pickup, lat: ll.lat, lng: ll.lng, pinned: true };
+  else if (stopId === 'd') patch.dropoff = { ...job.dropoff, lat: ll.lat, lng: ll.lng, pinned: true };
+  const write = { stops: patch.stops, pickup: patch.pickup, dropoff: patch.dropoff, updatedAt: now };
+  if (opsMode === 'demo') {
+    const pins = { ...(job.pins ?? {}) };
+    delete pins[stopId];
+    demoSet(P.jobs(t), job.id, { ...clean(write), pins }, true);
+  } else {
+    const { fs, db } = await full();
+    await fs.updateDoc(fs.doc(db, P.jobs(t), job.id), { ...clean(write), [`pins.${stopId}`]: fs.deleteField() });
+  }
+  await addEvent(t, job.id, { status: 'note', at: now, by: user.uid, byName: user.name, role: 'ops', note: 'Exact stop location set from the driver’s GPS' });
 }

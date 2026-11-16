@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTenant } from '../tenant/TenantProvider';
+import { legalDoc, REQUIRED } from '../legal/docs';
+import { acceptDocs } from '../legal/acceptance';
+import { LegalText } from '../legal/LegalText';
+import '../legal/legal.css';
 import { claimJobLink, getJobLink, opsMode, seedDemo } from '../ops/store';
 import type { JobLink } from '../ops/types';
 import { safeHttpsUrl } from '../lib/url';
@@ -88,7 +92,11 @@ export default function JobLinkPage() {
     setBusy(true);
     setErr(null);
     try {
-      await claimJobLink(token);
+      const res = await claimJobLink(token);
+      // record the click-wrap acceptance (append-only audit record) — never block starting the job on it
+      await acceptDocs(res.tenantId, { uid: res.uid, name: res.link.driverName, role: 'hired' }, REQUIRED.hired.map((id) => legalDoc(id, tenant))).catch((e) =>
+        console.warn('[legal] acceptance not saved', e),
+      );
       nav('/driver', { replace: true });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not open the jobs. Try again.');
@@ -180,8 +188,18 @@ export default function JobLinkPage() {
               </ul>
               <label className="checkbox drv-check">
                 <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-                <span>I agree to share my location and photos for these jobs</span>
+                <span>
+                  I accept the Hired Driver Terms and the{' '}
+                  <a href="/legal/privacy" target="_blank" rel="noopener">
+                    Privacy Notice
+                  </a>
+                  , and agree to share my location and photos for these jobs
+                </span>
               </label>
+              <details className="drv-terms">
+                <summary>Read the Hired Driver Terms</summary>
+                <LegalText body={legalDoc('hired', tenant).body} />
+              </details>
             </div>
 
             {err && (

@@ -9,7 +9,7 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-const SECTION_KEYS = ['hero', 'stats', 'services', 'logistics', 'fleet', 'promotions', 'trust', 'process', 'insights', 'areas', 'testimonials', 'faq', 'cta'];
+const SECTION_KEYS = ['hero', 'stats', 'services', 'logistics', 'fleet', 'promotions', 'trust', 'story', 'process', 'insights', 'areas', 'testimonials', 'faq', 'cta'];
 
 /** Repair legacy shapes (e.g. time windows stored as [start,end] tuples — Firestore forbids nested arrays). */
 export function normalizeTenant<T extends { booking?: { restrictedWindows?: { windows?: unknown[] } } }>(cfg: T): T {

@@ -15,6 +15,7 @@ import AdvancedTab from './AdvancedTab';
 import MarketTab from './MarketTab';
 import LogisticsTab from './LogisticsTab';
 import TrustTab from './TrustTab';
+import LegalTab from './LegalTab';
 
 interface TabDef {
   key: string;
@@ -36,6 +37,7 @@ export const CONTENT_TABS: TabDef[] = [
   { key: 'testimonials', label: 'Testimonials', icon: 'user', C: TestimonialsTab },
   { key: 'faqs', label: 'FAQs', icon: 'search', C: FaqsTab },
   { key: 'trust', label: 'Trust badges', icon: 'shield', C: TrustTab },
+  { key: 'legal', label: 'Legal & story', icon: 'contract', C: LegalTab },
   { key: 'contact', label: 'Contact & social', icon: 'phone', C: ContactTab },
   { key: 'areas', label: 'Service areas', icon: 'pin', C: AreasTab },
   { key: 'booking', label: 'Booking settings', icon: 'calendar', C: BookingTab },

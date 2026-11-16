@@ -66,7 +66,9 @@ export function applyTheme(t: TenantConfig) {
 
   // font
   const id = 'hp-font';
-  const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(th.font)}:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;600&family=Noto+Sans+Tamil:wght@400;600&display=swap`;
+  // Sinhala/Tamil faces only for Sri Lankan sites (saves ~3 font files on every South African page load)
+  const lk = t.locale?.country === 'LK' ? '&family=Noto+Sans+Sinhala:wght@400;600&family=Noto+Sans+Tamil:wght@400;600' : '';
+  const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(th.font)}:wght@400;500;600;700;800${lk}&display=swap`;
   let link = document.getElementById(id) as HTMLLinkElement | null;
   if (!link) {
     link = document.createElement('link');

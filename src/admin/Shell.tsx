@@ -1,3 +1,4 @@
+import { clearLive } from './ops/hooks';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { safeHttpsUrl } from '../lib/url';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -31,8 +32,10 @@ const NAV: NavItem[] = [
   { to: '/admin/vehicles', label: 'Vehicles', icon: 'truck', group: 'Operations' },
   { to: '/admin/drivers', label: 'Drivers', icon: 'user', group: 'Operations' },
   { to: '/admin/transporters', label: 'Transporters', icon: 'crossborder', group: 'Operations' },
+  { to: '/admin/places', label: 'Address book', icon: 'pin', group: 'Operations' },
   { to: '/admin/settlements', label: 'Settlements', icon: 'tag', group: 'Operations' },
   { to: '/admin/reports', label: 'Reports', icon: 'download', group: 'Operations' },
+  { to: '/admin/consents', label: 'Consents', icon: 'contract', group: 'Operations' },
   { to: '/admin/content', label: 'Site content', icon: 'palette', group: 'Website' },
   { to: '/admin/sites', label: 'Sites', icon: 'globe', superOnly: true, group: 'Website' },
 ];
@@ -73,6 +76,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     )
       return;
     await pushSignOut(tenant.id, profile.uid).catch(() => undefined);
+    clearLive();
     signOutSafe();
   };
 
