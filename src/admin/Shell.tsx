@@ -36,6 +36,7 @@ const NAV: NavItem[] = [
   { to: '/admin/settlements', label: 'Settlements', icon: 'tag', group: 'Operations' },
   { to: '/admin/reports', label: 'Reports', icon: 'download', group: 'Operations' },
   { to: '/admin/consents', label: 'Consents', icon: 'contract', group: 'Operations' },
+  { to: '/admin/notifications', label: 'Notifications', icon: 'mail', group: 'Operations' },
   { to: '/admin/content', label: 'Site content', icon: 'palette', group: 'Website' },
   { to: '/admin/sites', label: 'Sites', icon: 'globe', superOnly: true, group: 'Website' },
 ];

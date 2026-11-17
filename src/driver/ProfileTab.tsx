@@ -1,6 +1,6 @@
 import { useTenant } from '../tenant/TenantProvider';
 import { driverSignOut } from '../ops/store';
-import { PushPrompt } from '../push/PushPrompt';
+import { PushStatus } from '../push/PushStatus';
 import { pushSignOut } from '../push/usePush';
 import type { FleetUnit } from '../ops/types';
 import { Icon } from '../components/Icon';
@@ -125,7 +125,7 @@ export default function ProfileTab({ vehicles, share, onShare }: { vehicles: Fle
         </label>
       </section>
 
-      <PushPrompt className="btn btn-block" alwaysShow />
+      <PushStatus role="driver" tenantId={tenantId} compact />
 
       {!ext && (
         <button type="button" className="btn btn-danger btn-block drv-btn-xl" onClick={() => void pushSignOut(tenantId, driver.id).finally(() => void driverSignOut())}>

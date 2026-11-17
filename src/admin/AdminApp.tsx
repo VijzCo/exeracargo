@@ -23,6 +23,7 @@ const Transporters = lazy(() => import('./ops/Transporters'));
 const Places = lazy(() => import('./ops/Places'));
 const Settlements = lazy(() => import('./ops/Settlements'));
 const Acceptances = lazy(() => import('./Acceptances'));
+const Notifications = lazy(() => import('./Notifications'));
 const LegalPrint = lazy(() => import('./LegalPrint'));
 
 function SuperOnly({ children }: { children: JSX.Element }) {
@@ -85,6 +86,7 @@ export default function AdminApp() {
                   <Route path="places" element={<Places />} />
                   <Route path="settlements" element={<Settlements />} />
                   <Route path="consents" element={<Acceptances />} />
+                  <Route path="notifications" element={<Notifications />} />
                   <Route path="legal/:docId" element={<LegalPrint />} />
                   <Route path="content" element={<ContentEditor />} />
                   <Route path="content/:tab" element={<ContentEditor />} />

@@ -218,6 +218,28 @@ export const resetDriverPin = onCall({ enforceAppCheck: false }, async (req) => 
   return { ok: true };
 });
 
+// ── push self-test ────────────────────────────────────────────
+/** Sends a test notification to every device registered for the caller; reports what happened. */
+export const sendTestPush = onCall({ enforceAppCheck: false }, async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.');
+  const { tenantId, role } = (req.data ?? {}) as { tenantId?: string; role?: 'ops' | 'driver' };
+  if (!tenantId) throw new HttpsError('invalid-argument', 'tenantId is required.');
+  const isOps = await canManage(uid, tenantId);
+  const drv = isOps ? null : await getFirestore().doc(`tenants/${tenantId}/drivers/${uid}`).get();
+  if (!isOps && !drv?.get('active')) throw new HttpsError('permission-denied', 'Not a user of this site.');
+  const devices = await devicesOfUsers(tenantId, [uid]);
+  const sent = await send(devices, {
+    title: 'Exera Cargo — test notification',
+    body: 'Notifications are working on this device.',
+    url: role === 'driver' || !isOps ? '/driver' : '/admin',
+    channel: 'alerts',
+    tag: `test-${uid}`,
+  });
+  logger.info('test push', { tenantId, uid, devices: devices.length, sent });
+  return { devices: devices.length, sent, platforms: devices.map((d) => d.get('platform') as string) };
+});
+
 // ── daily expiry digest ───────────────────────────────────────
 
 const DAY = 86_400_000;

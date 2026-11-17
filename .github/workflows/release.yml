@@ -71,6 +71,8 @@ jobs:
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           WIF: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          VAPID: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
           API: ${{ secrets.VITE_FIREBASE_API_KEY }}
         run: |
           missing=""
@@ -78,6 +80,9 @@ jobs:
           [ -z "$SA" ] && [ -z "$WIF" ] && missing="$missing GCP_WORKLOAD_IDENTITY_PROVIDER+GCP_SERVICE_ACCOUNT(variables)_or_FIREBASE_SERVICE_ACCOUNT"
           [ -z "$API" ] && missing="$missing VITE_FIREBASE_*"
           if [ -n "$missing" ]; then echo "::error::Missing secrets:$missing (see the header of .github/workflows/release.yml)"; exit 1; fi
+          [ -z "$VAPID" ] && echo "::warning::VITE_FIREBASE_VAPID_KEY not set — web push (dispatch console, driver web app) is OFF in this release."
+          [ -z "$GSJ" ] && echo "::warning::GOOGLE_SERVICES_JSON not set — push is OFF in the Android app built by this release."
+          true
 
       - name: App config (.env.production.local + .env.android.local)
         env:

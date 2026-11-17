@@ -4,7 +4,7 @@ import { usePushState } from './usePush';
 
 export function PushPrompt({ className = 'btn btn-sm', alwaysShow = false }: { className?: string; alwaysShow?: boolean }) {
   const { state, request, error } = usePushState();
-  if (state === 'unsupported') return null;
+  if (state === 'unsupported') return null; // details + test on Notifications (console) / Profile (driver)
   if (state === 'granted')
     return alwaysShow ? (
       <span className="muted tiny" title="This device receives job and chat notifications">

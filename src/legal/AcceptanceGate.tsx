@@ -61,7 +61,7 @@ function Gate({
   const [err, setErr] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
-  // a document counts as read once scrolled to the end (or if it fits without scrolling)
+  // ✓ on a tab once its document was scrolled to the end (informational — never blocks accepting)
   const check = () => {
     const el = box.current;
     if (el && el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setRead((r) => (r.has(tab) ? r : new Set(r).add(tab)));
@@ -73,7 +73,6 @@ function Gate({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const allRead = read.size >= docs.length;
   const d = docs[tab];
 
   const accept = async () => {
@@ -114,9 +113,9 @@ function Gate({
           </p>
           <LegalText body={d.body} />
         </div>
-        {!allRead && <p className="legal-hint">Scroll to the end of {docs.length > 1 ? 'each document' : 'the document'} to continue.</p>}
+        {docs.length > 1 && read.size < docs.length && <p className="legal-hint">Tap each tab above to read every document.</p>}
         <label className="legal-check">
-          <input type="checkbox" checked={ok} disabled={!allRead} onChange={(e) => setOk(e.target.checked)} />
+          <input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
           <span>
             I have read and accept the {docs.map((x) => x.title).join(' and the ')}.
           </span>
@@ -130,7 +129,7 @@ function Gate({
           <button type="button" className="btn btn-ghost" onClick={onDecline} disabled={busy}>
             Decline &amp; sign out
           </button>
-          <button type="button" className="btn btn-primary" disabled={!ok || !allRead || busy} onClick={() => void accept()}>
+          <button type="button" className="btn btn-primary" disabled={!ok || busy} onClick={() => void accept()}>
             {busy ? 'Saving…' : 'Accept & continue'}
           </button>
         </div>

@@ -31,3 +31,18 @@ export async function resetDriverPin(tenantId: string, driverId: string, pin: st
     throw new Error(message || 'Could not reset the PIN.');
   }
 }
+
+/** Ask the server to push a test notification to all of this user's registered devices. */
+export async function sendTestPush(tenantId: string, role: 'ops' | 'driver'): Promise<{ devices: number; sent: number; platforms: string[] }> {
+  if (opsMode === 'demo') throw new Error('Not available in demo mode.');
+  const { getFunctions, httpsCallable } = await import('firebase/functions');
+  const call = httpsCallable<{ tenantId: string; role: string }, { devices: number; sent: number; platforms: string[] }>(getFunctions(getFbApp()!, REGION), 'sendTestPush');
+  try {
+    return (await call({ tenantId, role })).data;
+  } catch (e) {
+    const { code = '', message = '' } = e as { code?: string; message?: string };
+    if (code === 'functions/not-found' || (code === 'functions/internal' && /^internal$/i.test(message)))
+      throw new Error('The test function is not deployed yet (it ships with the next automatic release).');
+    throw new Error(message || 'Test failed.');
+  }
+}

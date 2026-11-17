@@ -91,7 +91,7 @@ function nativeSetup() {
 
 async function nativeRegister(ask: boolean): Promise<void> {
   // FCM needs google-services.json at build time; without it register() would crash the app
-  if (import.meta.env.VITE_ANDROID_PUSH !== '1') return setState('unsupported');
+  if (import.meta.env.VITE_ANDROID_PUSH !== '1') return setState('unsupported', 'This app build has no push set-up (GOOGLE_SERVICES_JSON missing in the build).');
   const { PushNotifications } = await nativeSetup();
   let p = await PushNotifications.checkPermissions();
   if (p.receive !== 'granted' && ask) p = await PushNotifications.requestPermissions();
@@ -107,6 +107,14 @@ async function webSupported(): Promise<boolean> {
   if (!VAPID || !getFbApp() || !('serviceWorker' in navigator) || !('Notification' in window) || !window.isSecureContext) return false;
   const { isSupported } = await import('firebase/messaging');
   return isSupported().catch(() => false);
+}
+
+function webUnsupportedReason(): string {
+  if (!VAPID) return 'Web push is not set up on this site (VITE_FIREBASE_VAPID_KEY missing in the build).';
+  if (!window.isSecureContext) return 'Notifications need a secure (https) address.';
+  if (!('Notification' in window) || !('serviceWorker' in navigator))
+    return 'This browser cannot receive notifications here. On iPhone/iPad, add the site to the Home Screen first.';
+  return 'This browser does not support web push.';
 }
 
 async function webRegister(ask: boolean): Promise<void> {
@@ -131,10 +139,20 @@ async function webRegister(ask: boolean): Promise<void> {
 
 async function enable(ask: boolean): Promise<void> {
   if (!ctx) return;
+  // Safari only shows the permission prompt when it is requested directly inside the click — so ask
+  // first, before any await (loading Firebase Messaging would otherwise break the user-gesture chain).
+  if (ask && !isNative() && VAPID && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try {
+      const r = await Notification.requestPermission();
+      if (r !== 'granted') return setState(r === 'denied' ? 'denied' : 'default');
+    } catch {
+      /* older Safari: callback form only — fall through to the normal path */
+    }
+  }
   try {
     if (isNative()) await nativeRegister(ask);
     else if (await webSupported()) await webRegister(ask);
-    else setState('unsupported');
+    else setState('unsupported', webUnsupportedReason());
   } catch (e) {
     console.warn('[push] not enabled', e);
     setState('error', e instanceof Error ? e.message : String(e));
@@ -151,7 +169,7 @@ export function usePushRegistration(c: { tenantId: string; uid: string | null | 
   const { tenantId, uid, role } = c;
   useEffect(() => {
     if (opsMode !== 'firebase' || !uid) {
-      setState('unsupported');
+      setState('unsupported', opsMode !== 'firebase' ? 'Not available in demo mode.' : '');
       return;
     }
     ctx = { tenantId, uid, role };
@@ -164,9 +182,9 @@ export function usePushRegistration(c: { tenantId: string; uid: string | null | 
 }
 
 /** Current push state (for custom UI). */
-export function usePushState(): { state: PushState; error: string; request: () => Promise<void> } {
+export function usePushState(): { state: PushState; error: string; request: () => Promise<void>; ctx: Ctx | null } {
   const s = useSyncExternalStore(subscribe, () => state);
-  return { state: s, error: lastError, request: () => enable(true) };
+  return { state: s, error: lastError, request: () => enable(true), ctx };
 }
 
 /** Call BEFORE signing out so this device stops receiving the user's notifications. */
